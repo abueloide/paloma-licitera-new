@@ -1,0 +1,41 @@
+# Configuración de Base de Datos
+database:
+  host: localhost
+  port: 5432
+  name: paloma_licitera
+  user: postgres
+  password: ""
+
+# Fuentes de Datos
+sources:
+  comprasmx:
+    enabled: true
+    url: "https://comprasmx.buengobierno.gob.mx"
+    batch_size: 100
+    
+  dof:
+    enabled: true
+    url: "https://www.dof.gob.mx"
+    batch_size: 50
+    
+  tianguis:
+    enabled: true
+    url: "https://tianguisdigital.cdmx.gob.mx"
+    batch_size: 200
+
+# Directorios
+paths:
+  data_raw: "data/raw"
+  data_processed: "data/processed"
+  logs: "logs"
+
+# API
+api:
+  host: "0.0.0.0"
+  port: 8000
+  debug: false
+
+# Logging
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
