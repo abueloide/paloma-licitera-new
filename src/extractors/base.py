@@ -49,9 +49,12 @@ class BaseExtractor(ABC):
             'fecha_publicacion': None,
             'fecha_apertura': None,
             'fecha_fallo': None,
+            'fecha_junta_aclaraciones': None,
             'monto_estimado': None,
             'moneda': 'MXN',
             'proveedor_ganador': None,
+            'caracter': None,
+            'uuid_procedimiento': None,
             'fuente': self.fuente,
             'url_original': None,
             'datos_originales': datos_crudos

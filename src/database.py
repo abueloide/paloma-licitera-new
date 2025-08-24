@@ -64,9 +64,12 @@ class Database:
             fecha_publicacion DATE,
             fecha_apertura DATE,
             fecha_fallo DATE,
+            fecha_junta_aclaraciones DATE,
             monto_estimado DECIMAL(15,2),
-            moneda VARCHAR(10),
+            moneda VARCHAR(10) DEFAULT 'MXN',
             proveedor_ganador TEXT,
+            caracter VARCHAR(50),
+            uuid_procedimiento VARCHAR(255),
             fuente VARCHAR(50) NOT NULL,
             url_original TEXT,
             fecha_captura TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -80,12 +83,15 @@ class Database:
         CREATE INDEX IF NOT EXISTS idx_fecha_pub ON licitaciones(fecha_publicacion);
         CREATE INDEX IF NOT EXISTS idx_fuente ON licitaciones(fuente);
         CREATE INDEX IF NOT EXISTS idx_estado ON licitaciones(estado);
+        CREATE INDEX IF NOT EXISTS idx_tipo_procedimiento ON licitaciones(tipo_procedimiento);
+        CREATE INDEX IF NOT EXISTS idx_tipo_contratacion ON licitaciones(tipo_contratacion);
+        CREATE INDEX IF NOT EXISTS idx_uuid ON licitaciones(uuid_procedimiento);
         """
         
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(schema)
-            logger.info("Esquema de BD creado/verificado")
+            logger.info("Esquema de BD creado/verificado con modelo completo")
     
     def insertar_licitacion(self, licitacion: Dict[str, Any]) -> bool:
         """Insertar una licitación en la BD."""
@@ -101,15 +107,15 @@ class Database:
         INSERT INTO licitaciones (
             numero_procedimiento, titulo, descripcion, entidad_compradora,
             unidad_compradora, tipo_procedimiento, tipo_contratacion, estado,
-            fecha_publicacion, fecha_apertura, fecha_fallo, monto_estimado,
-            moneda, proveedor_ganador, fuente, url_original, hash_contenido,
-            datos_originales
+            fecha_publicacion, fecha_apertura, fecha_fallo, fecha_junta_aclaraciones,
+            monto_estimado, moneda, proveedor_ganador, caracter, uuid_procedimiento,
+            fuente, url_original, hash_contenido, datos_originales
         ) VALUES (
             %(numero_procedimiento)s, %(titulo)s, %(descripcion)s, %(entidad_compradora)s,
             %(unidad_compradora)s, %(tipo_procedimiento)s, %(tipo_contratacion)s, %(estado)s,
-            %(fecha_publicacion)s, %(fecha_apertura)s, %(fecha_fallo)s, %(monto_estimado)s,
-            %(moneda)s, %(proveedor_ganador)s, %(fuente)s, %(url_original)s, %(hash_contenido)s,
-            %(datos_originales)s
+            %(fecha_publicacion)s, %(fecha_apertura)s, %(fecha_fallo)s, %(fecha_junta_aclaraciones)s,
+            %(monto_estimado)s, %(moneda)s, %(proveedor_ganador)s, %(caracter)s, %(uuid_procedimiento)s,
+            %(fuente)s, %(url_original)s, %(hash_contenido)s, %(datos_originales)s
         )
         ON CONFLICT (hash_contenido) DO NOTHING
         RETURNING id;

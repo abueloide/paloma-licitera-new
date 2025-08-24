@@ -1,109 +1,93 @@
-# Paloma Licitera Setup - Changes Log
+# Change Log - Paloma Licitera
 
-## Date: 23 de agosto de 2025
+## [2.1.0] - 2025-08-23
 
-### Initial Setup Steps
+### 🔧 Modelo de Base de Datos Completo
+- ✅ **Revisión completa del esquema de BD** - Analizado todos los extractores para campos requeridos
+- ✅ **Modelo actualizado con todos los campos**:
+  - Campos básicos: `numero_procedimiento`, `titulo`, `descripcion`, `entidad_compradora`, `unidad_compradora`
+  - Tipos: `tipo_procedimiento`, `tipo_contratacion`, `estado`
+  - Fechas: `fecha_publicacion`, `fecha_apertura`, `fecha_fallo`, `fecha_junta_aclaraciones`
+  - Financiero: `monto_estimado`, `moneda`, `proveedor_ganador`
+  - Adicionales: `caracter`, `uuid_procedimiento`, `fuente`, `url_original`, `datos_originales`
+- ✅ **8 índices optimizados** para consultas rápidas
+- ✅ **Deduplicación automática** por hash único (número + entidad + fuente)
+- ✅ **Constraint única** para evitar duplicados
 
-#### 1. Python Environment Setup
-- **Issue Found**: macOS has externally managed Python environment
-- **Solution**: Created virtual environment using `python3 -m venv venv`
-- **Status**: ✅ Completed
-- **Command**: `python3 -m venv venv && source venv/bin/activate`
+### 🚀 ETL ComprasMX Funcional
+- ✅ **ETL end-to-end exitoso**: 600 extraídos → 100 insertados únicos → 0 errores
+- ✅ **Scraper + Extractor + BD** funcionando perfectamente
+- ✅ **Procesamiento de 13 archivos JSON** generados por el scraper
+- ✅ **Sistema de deduplicación funcionando** correctamente
 
-#### 2. Requirements Installation Attempt #1
-- **Issue Found**: Pandas 2.1.4 not compatible with Python 3.13
-- **Action**: Updated requirements.txt with newer versions compatible with Python 3.13
-- **Status**: 🔄 In Progress
+### 🔍 Análisis de Rendimiento ComprasMX
+- ⚠️ **Extracción parcial detectada**: Solo 100 licitaciones únicas vs 1490 esperadas
+- 📊 **Datos actuales en portal**: 1490 licitaciones activas según el usuario
+- 🔍 **Investigación requerida**: Verificar configuración del scraper de paginación
+- 📝 **Archivos generados**: 13 JSONs (5 expedientes + 8 catálogos)
 
-#### 3. Requirements.txt Updates
-- Updated pandas from `==2.1.4` to `>=2.2.0`
-- Updated psycopg2-binary to `>=2.9.10`
-- Updated sqlalchemy to `>=2.0.25`
-- Updated playwright to `>=1.45.0`
-- Updated fastapi to `>=0.110.0`
-- Updated uvicorn to `>=0.27.0`
-- Updated pydantic to `>=2.6.0`
+### 🛠️ Correcciones Técnicas Realizadas
+- ✅ **Recreación completa de tabla BD** para esquema actualizado
+- ✅ **Actualización BaseExtractor** con todos los campos del modelo
+- ✅ **Query de inserción corregida** para incluir nuevos campos
+- ✅ **Migración de esquema exitosa** sin pérdida de funcionalidad
 
-#### 4. Dependencies Installation
-- **Status**: ✅ Completed Successfully
-- **Command**: `pip install -r requirements.txt`
-- **Result**: All 33 packages installed successfully including:
-  - pandas 2.3.2 (compatible with Python 3.13)
-  - playwright 1.54.0
-  - fastapi 0.116.1
-  - sqlalchemy 2.0.43
-  - psycopg2-binary 2.9.10
-  - All other dependencies
+### 📈 Estadísticas de Procesamiento
+- **Archivos procesados**: 13 JSONs de ComprasMX
+- **Licitaciones extraídas**: 600 (con duplicados entre archivos)
+- **Licitaciones únicas insertadas**: 100
+- **Tiempo de procesamiento**: 29 segundos
+- **Tasa de éxito**: 100% (0 errores)
 
-#### 5. Setup.py Execution
-- **Status**: ✅ Completed Successfully
-- **Command**: `python setup.py`
-- **Results**:
-  - Python 3.13.3 confirmed
-  - All dependencies verified as installed
-  - Directory structure created:
-    - `data/raw/comprasmx`
-    - `data/raw/dof`
-    - `data/raw/tianguis`
-    - `data/processed/tianguis`
-    - `logs`
+### 🎯 Próximas Acciones Prioritarias
+1. **Investigar configuración de paginación en ComprasMX scraper** - Aumentar cobertura de 100 a 1490+ licitaciones
+2. **Verificar parámetros de extracción** del scraper Playwright
+3. **Optimizar scraper para capturar todas las páginas** disponibles
+4. **Probar otros extractores** (DOF, Tianguis) con modelo actualizado
 
-#### 6. Config.yaml Configuration
-- **Status**: ✅ Completed (Auto-generated)
-- **File**: `config.yaml` already exists with default settings
-- **Database Config**: 
-  - Host: localhost
-  - Port: 5432
-  - Database: paloma_licitera
-  - User: postgres
-  - Password: (empty - needs to be set if required)
-- **Sources**: ComprasMX, DOF, Tianguis Digital all enabled
-- **API**: Port 8000, host 0.0.0.0
+## [2.0.0] - 2025-08-23
 
-#### 7. Database Initialization Attempt #1
-- **Status**: ❌ Failed
-- **Command**: `python src/database.py --setup`
-- **Error**: `role "postgres" does not exist`
-- **Issue**: PostgreSQL not installed or configured on macOS
-- **Solution**: Install PostgreSQL using Homebrew
+### Configuración ETL con Scrapers
+- ✅ ETL configurado para ejecutar scrapers de `etl-process/extractors/`
+- ✅ Integración completa: scraping → procesamiento → carga BD
+- ✅ Base de datos PostgreSQL configurada y funcional
 
-#### 8. PostgreSQL Installation
-- **Status**: ✅ Completed Successfully
-- **Command**: `brew install postgresql@15`
-- **Version**: PostgreSQL 15.14
-- **Installation Location**: `/opt/homebrew/Cellar/postgresql@15/15.14/`
-- **Database Cluster**: Created at `/opt/homebrew/var/postgresql@15`
-- **Note**: PostgreSQL@15 is keg-only (not symlinked to main PATH)
+### Prioridades de Fuentes (por importancia)
+1. **ComprasMX** - Portal Federal de Compras (máxima prioridad)
+2. **DOF** - Diario Oficial de la Federación (alta prioridad)  
+3. **Tianguis Digital** - CDMX (media prioridad)
+4. **Sitios Masivos** - Múltiples sitios gubernamentales (menor prioridad)
 
-#### 9. PostgreSQL Service Start
-- **Status**: ✅ Completed Successfully
-- **Command**: `brew services start postgresql@15`
-- **Result**: PostgreSQL 15 service is now running
+### Scrapers Integrados
+- `comprasMX/scraper_compras_playwright.py` - Scraper de ComprasMX con Playwright
+- `dof/dof_extraccion_estructuracion.py` - Scraper del DOF con parseo estructurado
+- `tianguis-digital/extractor-tianguis.py` - Scraper de Tianguis Digital CDMX
+- `sitios-masivos/PruebaUnoGPT.py` - Scraper masivo de múltiples sitios
 
-#### 10. Database User Creation
-- **Status**: ✅ Completed Successfully
-- **Command**: `/opt/homebrew/opt/postgresql@15/bin/createuser -s postgres`
-- **Result**: PostgreSQL superuser 'postgres' created
+### Procesadores Creados
+- ✅ `ComprasMXExtractor` - Procesa JSONs de ComprasMX
+- ✅ `DOFExtractor` - Procesa JSONs estructurados del DOF
+- ✅ `TianguisExtractor` - Procesa CSVs OCDS de Tianguis
+- ✅ `SitiosMasivosExtractor` - Procesa JSONLs de sitios masivos
+- ✅ `ZipProcessor` - Procesa ZIPs de PAAAPS
 
-#### 11. Database Initialization Attempt #2
-- **Status**: ✅ Completed Successfully
-- **Command**: `python src/database.py --setup`
-- **Result**: "✅ Base de datos configurada" - Database tables and schema created
+### Dependencias Instaladas
+- ✅ lxml, html5lib, beautifulsoup4 (parseo HTML)
+- ✅ playwright (automación navegador)
+- ✅ requests, pandas, pyyaml
+- ✅ psycopg2-binary (PostgreSQL)
 
-#### 12. ETL Process Execution
-- **Status**: ✅ Completed Successfully
-- **Command**: `python src/etl.py --fuente all`
-- **Results**:
-  - Extracted: 0 files (no source data files found)
-  - Inserted: 0 records
-  - Errors: 0
-  - Duration: 0.001660 seconds
-- **Note**: No data files present yet - this is expected for a fresh installation
+### Directorios Configurados
+- ✅ `data/raw/` - Archivos generados por scrapers
+- ✅ `data/processed/` - Archivos procesados
+- ✅ Entorno virtual configurado
 
-### Current Step: Start API Server
-**Status**: 🔄 In Progress
+### Issues Identificados
+- ❌ Scraper sitios masivos: 0 resultados (problemas SSL, HTTP errors)
+- ⚠️ Necesita testing de scrapers prioritarios (ComprasMX, DOF, Tianguis)
 
-### Remaining Steps
-- Start API server
-
----
+### Próximos Pasos
+1. Probar ComprasMX (prioridad máxima)
+2. Probar DOF (prioridad alta)
+3. Probar Tianguis Digital (prioridad media)
+4. Debuggear sitios masivos (prioridad menor)
