@@ -12,7 +12,7 @@ import {
 } from '../types';
 
 // Configure axios base URL - use proxy in development, direct in production
-const baseURL = import.meta.env.DEV ? '/api' : 'http://localhost:8000';
+const baseURL = import.meta.env?.DEV ? '/api' : 'http://localhost:8000';
 
 const api = axios.create({
   baseURL,

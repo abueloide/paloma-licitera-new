@@ -5,7 +5,6 @@ import {
   ExternalLink, 
   Building2, 
   Calendar, 
-  DollarSign,
   FileText,
   Tag,
   AlertCircle,

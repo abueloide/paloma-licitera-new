@@ -152,7 +152,7 @@ const Dashboard: React.FC = () => {
           </div>
           <div className="card-body">
             <div className="space-y-3">
-              {stats.por_fuente?.slice(0, 5).map((fuente, index) => (
+              {stats.por_fuente?.slice(0, 5).map((fuente) => (
                 <div key={fuente.fuente} className="flex items-center justify-between">
                   <span className="text-sm font-medium">{fuente.fuente}</span>
                   <div className="flex items-center">
@@ -180,7 +180,7 @@ const Dashboard: React.FC = () => {
           </div>
           <div className="card-body">
             <div className="space-y-3">
-              {stats.por_estado?.slice(0, 5).map((estado, index) => (
+              {stats.por_estado?.slice(0, 5).map((estado) => (
                 <div key={estado.estado} className="flex items-center justify-between">
                   <span className="text-sm font-medium">{estado.estado || 'Sin estado'}</span>
                   <div className="flex items-center">
