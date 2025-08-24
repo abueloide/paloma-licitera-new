@@ -1,0 +1,26 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Paloma símbolo -->
+  <circle cx="100" cy="100" r="90" fill="#1e40af" stroke="#1e3a8a" stroke-width="3"/>
+  
+  <!-- Cuerpo de la paloma -->
+  <ellipse cx="100" cy="120" rx="25" ry="35" fill="white"/>
+  
+  <!-- Cabeza de la paloma -->
+  <circle cx="100" cy="85" r="18" fill="white"/>
+  
+  <!-- Pico -->
+  <path d="M 85 85 L 78 88 L 85 91 Z" fill="#fbbf24"/>
+  
+  <!-- Ojo -->
+  <circle cx="92" cy="80" r="3" fill="#1e40af"/>
+  
+  <!-- Alas -->
+  <ellipse cx="80" cy="115" rx="12" ry="20" fill="#e5e7eb" transform="rotate(-30 80 115)"/>
+  <ellipse cx="120" cy="115" rx="12" ry="20" fill="#e5e7eb" transform="rotate(30 120 115)"/>
+  
+  <!-- Documento en el pico -->
+  <rect x="65" y="82" width="12" height="8" fill="white" stroke="#1e40af" stroke-width="1"/>
+  <line x1="67" y1="84" x2="75" y2="84" stroke="#1e40af" stroke-width="0.5"/>
+  <line x1="67" y1="86" x2="75" y2="86" stroke="#1e40af" stroke-width="0.5"/>
+  <line x1="67" y1="88" x2="73" y2="88" stroke="#1e40af" stroke-width="0.5"/>
+</svg>
