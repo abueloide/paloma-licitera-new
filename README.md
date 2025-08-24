@@ -1,10 +1,11 @@
 # Paloma Licitera - Versión Simplificada
 
 ## 📋 Descripción
-Sistema ETL para procesar licitaciones gubernamentales de México desde múltiples fuentes.
+Sistema ETL para procesar licitaciones gubernamentales de México desde múltiples fuentes con frontend web moderno.
 
 ## 🚀 Inicio Rápido
 
+### Backend (API)
 ```bash
 # Instalar dependencias
 pip install -r requirements.txt
@@ -15,8 +16,23 @@ python src/database.py --setup
 # Ejecutar ETL completo
 python src/etl.py --all
 
-# Iniciar API
-python src/api.py
+# Iniciar API en puerto 8000
+python src/api_enhanced.py
+```
+
+### Frontend (Dashboard Web)
+```bash
+# Ir a la carpeta frontend
+cd frontend
+
+# Instalar dependencias
+npm install
+
+# Iniciar servidor de desarrollo en puerto 3000
+npm run dev
+
+# O usar el script de inicio
+./start.sh
 ```
 
 ## 📁 Estructura
@@ -24,13 +40,22 @@ python src/api.py
 ```
 paloma-licitera-new/
 ├── src/
-│   ├── extractors/      # Extractores por fuente
-│   ├── database.py      # Gestión de BD
-│   ├── etl.py          # Orquestador principal
-│   └── api.py          # API REST
+│   ├── extractors/       # Extractores por fuente
+│   ├── database.py       # Gestión de BD
+│   ├── etl.py           # Orquestador principal
+│   ├── api.py           # API REST básica
+│   └── api_enhanced.py  # API REST avanzada
+├── frontend/            # Frontend React + TypeScript
+│   ├── src/
+│   │   ├── components/  # Componentes React
+│   │   ├── pages/      # Páginas de la aplicación
+│   │   ├── services/   # Servicios API
+│   │   └── types/      # Definiciones TypeScript
+│   ├── package.json    # Dependencias frontend
+│   └── start.sh       # Script de inicio
 ├── config.yaml         # Configuración
-├── requirements.txt    # Dependencias
-└── data/              # Datos procesados
+├── requirements.txt     # Dependencias Python
+└── data/               # Datos procesados
 ```
 
 ## 🔧 Configuración
@@ -66,12 +91,15 @@ sources:
 ## 🔌 API Endpoints
 
 - `GET /` - Información del sistema
-- `GET /health` - Estado del sistema
-- `GET /licitaciones` - Lista de licitaciones con filtros
-- `GET /licitaciones/{id}` - Detalle de licitación
 - `GET /stats` - Estadísticas generales
-- `GET /filters` - Valores únicos para filtros
-- `POST /etl/run` - Ejecutar proceso ETL
+- `GET /licitaciones` - Lista de licitaciones con filtros avanzados
+- `GET /licitaciones/{id}` - Detalle de licitación
+- `GET /filtros` - Valores únicos para filtros
+- `GET /analisis/por-tipo-contratacion` - Análisis por tipo
+- `GET /analisis/por-dependencia` - Análisis por entidad
+- `GET /analisis/por-fuente` - Análisis por fuente de datos
+- `GET /analisis/temporal` - Análisis temporal
+- `GET /busqueda-rapida` - Búsqueda rápida para autocompletado
 
 ### Ejemplos de uso
 
@@ -83,11 +111,47 @@ curl http://localhost:8000/licitaciones
 curl http://localhost:8000/licitaciones?fuente=COMPRASMX
 
 # Buscar por texto
-curl http://localhost:8000/licitaciones?q=mantenimiento
+curl http://localhost:8000/licitaciones?busqueda=mantenimiento
 
-# Ejecutar ETL
-curl -X POST http://localhost:8000/etl/run?fuente=all
+# Obtener estadísticas
+curl http://localhost:8000/stats
 ```
+
+## 🌐 Frontend Web
+
+El frontend incluye:
+
+### 📊 **Dashboard Principal**
+- Estadísticas generales del sistema
+- Gráficos por fuente y estado
+- Resumen de montos y totales
+- Estado de última actualización
+
+### 🔍 **Buscador de Licitaciones**
+- Tabla paginada con todas las licitaciones
+- Filtros avanzados (fuente, estado, tipo, entidad, fechas, montos)
+- Búsqueda de texto libre
+- Navegación a detalles completos
+
+### 📈 **Análisis Avanzado**
+- Análisis por tipo de contratación
+- Top entidades compradoras
+- Comparativa por fuente de datos
+- Métricas consolidadas
+
+### 👁️ **Vista Detallada**
+- Información completa de cada licitación
+- Datos estructurados y originales
+- Enlaces a fuentes externas
+- Historial técnico
+
+### 🛠️ **Características Técnicas**
+- **React 18** con TypeScript
+- **Vite** para desarrollo rápido
+- **Responsive Design** para móviles y escritorio
+- **API Proxy** configurado automáticamente
+- **Manejo de errores** y estados de carga
+- **Navegación** con React Router
 
 ## 📦 Procesamiento de archivos ZIP
 

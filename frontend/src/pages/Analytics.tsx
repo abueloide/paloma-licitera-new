@@ -145,7 +145,7 @@ const Analytics: React.FC = () => {
           </div>
           <div className="card-body">
             <div className="space-y-4">
-              {analisisContratacion.slice(0, 8).map((tipo, index) => (
+              {analisisContratacion.slice(0, 8).map((tipo) => (
                 <div key={tipo.tipo_contratacion} className="space-y-2">
                   <div className="flex justify-between items-center">
                     <span className="text-sm font-medium truncate mr-2">
