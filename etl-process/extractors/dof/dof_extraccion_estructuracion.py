@@ -25,8 +25,8 @@ from estructura_dof import DOFLicitacionesExtractor
 logging.getLogger("pdfminer").setLevel(logging.ERROR)
 
 # ========= Config =========
-OUT_DIR = "../../descargas/dof"
-OUT_JSON_DIR = "../"
+OUT_DIR = "../../data/raw/dof"
+OUT_JSON_DIR = "../../data/raw/dof"
 # Fechas: martes y jueves de agosto 2025
 AUG_DAYS = [d for d in range(1, 32)]
 AUG_2025 = [date(2025, 8, d) for d in AUG_DAYS if date(2025, 8, d).weekday() in (1, 3)]  # 1=Martes, 3=Jueves

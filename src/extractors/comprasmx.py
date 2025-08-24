@@ -46,6 +46,12 @@ class ComprasMXExtractor(BaseExtractor):
         with open(json_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
+        # Detectar formato específico del nuevo scraper v2
+        if self._es_archivo_resumen(json_path.name, data):
+            return self._procesar_archivo_resumen(data)
+        elif self._es_archivo_todos_expedientes(json_path.name, data):
+            return self._procesar_archivo_todos_expedientes(data)
+        
         # El formato puede variar, intentar diferentes estructuras
         registros = []
         
@@ -71,6 +77,10 @@ class ComprasMXExtractor(BaseExtractor):
             # Formato 4: Objeto con campo 'licitaciones'
             elif 'licitaciones' in data:
                 registros = data['licitaciones']
+                
+            # Formato 5: Objeto con campo 'expedientes' (nuevo scraper)
+            elif 'expedientes' in data:
+                registros = data['expedientes']
         
         # Procesar registros
         for registro in registros:
@@ -81,11 +91,43 @@ class ComprasMXExtractor(BaseExtractor):
         logger.info(f"Extraídas {len(licitaciones)} licitaciones de {json_path.name}")
         return licitaciones
     
+    def _es_archivo_resumen(self, filename: str, data: dict) -> bool:
+        """Detectar si es un archivo de resumen del scraper v2."""
+        return (filename.startswith('resumen_') and 
+                isinstance(data, dict) and 
+                'total_expedientes_capturados' in data)
+    
+    def _es_archivo_todos_expedientes(self, filename: str, data: dict) -> bool:
+        """Detectar si es un archivo con todos los expedientes del scraper v2."""
+        return (filename.startswith('todos_expedientes_') and
+                isinstance(data, dict) and 
+                'expedientes' in data and 
+                'total_expedientes' in data)
+    
+    def _procesar_archivo_resumen(self, data: dict) -> List[Dict[str, Any]]:
+        """Procesar archivo de resumen (no contiene expedientes, solo estadísticas)."""
+        logger.info(f"Archivo de resumen detectado: {data.get('total_expedientes_capturados', 0)} expedientes capturados")
+        return []  # Los resúmenes no contienen expedientes para procesar
+    
+    def _procesar_archivo_todos_expedientes(self, data: dict) -> List[Dict[str, Any]]:
+        """Procesar archivo con todos los expedientes consolidados."""
+        logger.info(f"Archivo de expedientes consolidados detectado: {data.get('total_expedientes', 0)} expedientes")
+        
+        licitaciones = []
+        expedientes = data.get('expedientes', [])
+        
+        for expediente in expedientes:
+            licitacion = self._parsear_registro(expediente)
+            if licitacion:
+                licitaciones.append(licitacion)
+        
+        return licitaciones
+    
     def _parsear_registro(self, registro: Dict) -> Dict[str, Any]:
         """Parsear un registro de ComprasMX."""
         try:
-            # Validar campos mínimos
-            numero = registro.get('numero_procedimiento', '')
+            # Validar campos mínimos - el nuevo scraper usa 'cod_expediente'
+            numero = registro.get('numero_procedimiento') or registro.get('cod_expediente', '')
             if not numero:
                 return None
             
@@ -97,28 +139,58 @@ class ComprasMXExtractor(BaseExtractor):
             tipo_cont_original = registro.get('tipo_contratacion', '')
             tipo_cont = self._normalizar_tipo_contratacion(tipo_cont_original)
             
-            # Parsear fechas
+            # Parsear fechas - el nuevo scraper puede tener más campos de fecha
             fecha_apertura = self._parsear_fecha(registro.get('fecha_apertura'))
             fecha_aclaraciones = self._parsear_fecha(registro.get('fecha_aclaraciones'))
+            fecha_fallo = self._parsear_fecha(registro.get('fecha_fallo'))
+            fecha_publicacion = self._parsear_fecha(registro.get('fecha_publicacion'))
             
-            # Construir URL si existe UUID
+            # Si no hay fecha de publicación, usar fecha actual
+            if not fecha_publicacion:
+                fecha_publicacion = datetime.now().date()
+            
+            # Construir URL - el nuevo scraper puede tener diferentes formatos
             uuid = registro.get('uuid_procedimiento', '')
-            url = f"https://comprasmx.buengobierno.gob.mx/procedimiento/{uuid}" if uuid else None
+            url_original = registro.get('url_original')
+            if not url_original and uuid:
+                url_original = f"https://comprasmx.buengobierno.gob.mx/procedimiento/{uuid}"
+            elif not url_original:
+                url_original = "https://comprasmx.buengobierno.gob.mx/"
+            
+            # Extraer monto si está disponible
+            monto_estimado = None
+            monto_str = registro.get('monto_estimado') or registro.get('presupuesto_estimado')
+            if monto_str and isinstance(monto_str, (str, int, float)):
+                try:
+                    # Limpiar y convertir monto
+                    if isinstance(monto_str, str):
+                        monto_limpio = monto_str.replace('$', '').replace(',', '').replace(' ', '')
+                        monto_estimado = float(monto_limpio) if monto_limpio.replace('.', '').isdigit() else None
+                    else:
+                        monto_estimado = float(monto_str)
+                except:
+                    monto_estimado = None
             
             # Crear licitación normalizada
             licitacion = self.normalizar_licitacion(registro)
             licitacion.update({
                 'numero_procedimiento': numero,
-                'titulo': registro.get('nombre_procedimiento', '')[:500],
-                'entidad_compradora': registro.get('siglas', ''),
+                'titulo': (registro.get('nombre_procedimiento') or registro.get('titulo', ''))[:500],
+                'descripcion': registro.get('descripcion'),
+                'entidad_compradora': registro.get('siglas') or registro.get('entidad_compradora', ''),
                 'unidad_compradora': registro.get('unidad_compradora'),
                 'tipo_procedimiento': tipo_proc,
                 'tipo_contratacion': tipo_cont,
-                'estado': registro.get('estatus_alterno', 'VIGENTE'),
-                'fecha_publicacion': datetime.now().date(),  # ComprasMX no tiene fecha pub
+                'estado': self._normalizar_estado(registro.get('estatus_alterno') or registro.get('estado', 'VIGENTE')),
+                'fecha_publicacion': fecha_publicacion,
                 'fecha_apertura': fecha_apertura,
+                'fecha_fallo': fecha_fallo,
                 'fecha_junta_aclaraciones': fecha_aclaraciones,
-                'url_original': url
+                'monto_estimado': monto_estimado,
+                'moneda': 'MXN',
+                'url_original': url_original,
+                'caracter': registro.get('caracter'),
+                'uuid_procedimiento': uuid
             })
             
             return licitacion
@@ -184,3 +256,21 @@ class ComprasMXExtractor(BaseExtractor):
             logger.debug(f"Error parseando fecha '{fecha_str}': {e}")
             
         return None
+    
+    def _normalizar_estado(self, estado: str) -> str:
+        """Normalizar estado del procedimiento."""
+        if not estado:
+            return 'VIGENTE'
+            
+        estado_upper = estado.upper()
+        
+        if any(term in estado_upper for term in ['ACTIV', 'VIGENTE', 'ABIERTO', 'PUBLICADO']):
+            return 'VIGENTE'
+        elif any(term in estado_upper for term in ['CERRADO', 'FINALIZADO', 'CONCLUIDO']):
+            return 'CERRADO'
+        elif any(term in estado_upper for term in ['CANCELADO', 'ANULADO']):
+            return 'CANCELADO'
+        elif any(term in estado_upper for term in ['DESIERTO', 'SIN POSTORES']):
+            return 'DESIERTO'
+        else:
+            return 'VIGENTE'

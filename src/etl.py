@@ -67,25 +67,32 @@ class ETL:
             
         return processors
     
-    def ejecutar(self, fuente: str = 'all') -> Dict:
+    def ejecutar(self, fuente: str = 'all', solo_procesamiento: bool = False) -> Dict:
         """
         Ejecutar ETL completo: scraping + procesamiento + carga.
         
         Args:
             fuente: 'all', 'comprasmx', 'dof', 'tianguis', 'sitios-masivos', 'zip'
+            solo_procesamiento: Si True, omite la fase de scraping
         """
-        logger.info(f"Iniciando ETL completo para: {fuente}")
+        logger.info(f"Iniciando ETL para: {fuente}")
+        if solo_procesamiento:
+            logger.info("🚫 MODO SOLO PROCESAMIENTO - Omitiendo scrapers")
+        
         resultados = {
             'inicio': datetime.now(),
             'fuentes': {},
             'totales': {'extraidos': 0, 'insertados': 0, 'errores': 0}
         }
         
-        # 1. FASE DE SCRAPING - Ejecutar scrapers
-        if fuente == 'all':
-            self._ejecutar_todos_scrapers(resultados)
+        # 1. FASE DE SCRAPING - Solo si no es solo procesamiento
+        if not solo_procesamiento:
+            if fuente == 'all':
+                self._ejecutar_todos_scrapers(resultados)
+            else:
+                self._ejecutar_scraper(fuente, resultados)
         else:
-            self._ejecutar_scraper(fuente, resultados)
+            logger.info("⏭️ Saltando fase de scraping...")
         
         # 2. FASE DE PROCESAMIENTO - Procesar archivos generados
         self._procesar_archivos_generados(fuente, resultados)
@@ -97,7 +104,7 @@ class ETL:
         resultados['fin'] = datetime.now()
         resultados['duracion'] = str(resultados['fin'] - resultados['inicio'])
         
-        logger.info(f"ETL completo terminado: {resultados['totales']}")
+        logger.info(f"ETL terminado: {resultados['totales']}")
         return resultados
     
     def _ejecutar_todos_scrapers(self, resultados: Dict):
@@ -152,24 +159,31 @@ class ETL:
     
     def _ejecutar_comprasmx_scraper(self, resultado: Dict):
         """Ejecutar scraper de ComprasMX."""
-        scraper_path = self.scrapers_dir / "comprasMX" / "scraper_compras_playwright (1).py"
+        # Usar el nuevo scraper avanzado ComprasMX_v2Claude.py
+        scraper_path = self.scrapers_dir / "comprasMX" / "ComprasMX_v2Claude.py"
         
         if scraper_path.exists():
-            logger.info("Ejecutando scraper ComprasMX con Playwright...")
+            logger.info("🕷️ Ejecutando scraper ComprasMX v2 (captura completa)...")
             
-            # Ejecutar el scraper
+            # Ejecutar el scraper avanzado
             process = subprocess.run([
                 sys.executable, str(scraper_path)
             ], capture_output=True, text=True, cwd=str(scraper_path.parent))
             
             if process.returncode == 0:
                 resultado['scraping_exitoso'] = True
-                logger.info("✅ Scraper ComprasMX ejecutado exitosamente")
+                logger.info("✅ Scraper ComprasMX v2 ejecutado exitosamente")
+                # Contar archivos generados
+                data_dir = Path("data/raw/comprasmx")
+                json_files = list(data_dir.glob("*.json")) if data_dir.exists() else []
+                resultado['archivos_generados'] = len(json_files)
+                logger.info(f"📁 Archivos JSON generados: {len(json_files)}")
             else:
-                logger.error(f"❌ Error en scraper ComprasMX: {process.stderr}")
+                logger.error(f"❌ Error en scraper ComprasMX v2: {process.stderr}")
                 resultado['error_scraping'] = process.stderr
         else:
             logger.warning(f"Scraper no encontrado: {scraper_path}")
+            resultado['error_scraping'] = f"Scraper no encontrado: {scraper_path}"
     
     def _ejecutar_dof_scraper(self, resultado: Dict):
         """Ejecutar scraper del DOF."""
@@ -337,6 +351,11 @@ def main():
         action='store_true',
         help='Configurar base de datos'
     )
+    parser.add_argument(
+        '--solo-procesamiento',
+        action='store_true',
+        help='Solo procesar archivos existentes, sin ejecutar scrapers'
+    )
     
     args = parser.parse_args()
     
@@ -346,7 +365,7 @@ def main():
         etl.db.setup()
         print("✅ Base de datos configurada")
     else:
-        resultados = etl.ejecutar(args.fuente)
+        resultados = etl.ejecutar(args.fuente, solo_procesamiento=getattr(args, 'solo_procesamiento', False))
         print(f"""
 🎯 ETL Completado
 ═══════════════
