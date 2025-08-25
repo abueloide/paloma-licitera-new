@@ -31,7 +31,8 @@ const DataTable = ({ data, loading, onPageChange, onViewDetails }: DataTableProp
     );
   }
 
-  if (!data || data.licitaciones.length === 0) {
+  // Safe check for data and licitaciones
+  if (!data || !data.licitaciones || !Array.isArray(data.licitaciones) || data.licitaciones.length === 0) {
     return (
       <Card className="card-shadow">
         <CardHeader>
@@ -46,7 +47,7 @@ const DataTable = ({ data, loading, onPageChange, onViewDetails }: DataTableProp
     );
   }
 
-  const { licitaciones, total, page, total_pages } = data;
+  const { licitaciones, total = 0, page = 1, total_pages = 1 } = data;
 
   return (
     <Card className="card-shadow">
@@ -75,40 +76,40 @@ const DataTable = ({ data, loading, onPageChange, onViewDetails }: DataTableProp
               {licitaciones.map((licitacion) => (
                 <TableRow key={licitacion.id}>
                   <TableCell className="font-mono text-sm">
-                    {licitacion.numero_licitacion}
+                    {licitacion.numero_licitacion || 'N/A'}
                   </TableCell>
                   <TableCell className="max-w-xs">
-                    <div className="truncate" title={licitacion.titulo}>
-                      {licitacion.titulo}
+                    <div className="truncate" title={licitacion.titulo || ''}>
+                      {licitacion.titulo || 'Sin título'}
                     </div>
                   </TableCell>
                   <TableCell className="max-w-xs">
-                    <div className="truncate" title={licitacion.entidad_compradora}>
-                      {licitacion.entidad_compradora}
+                    <div className="truncate" title={licitacion.entidad_compradora || ''}>
+                      {licitacion.entidad_compradora || 'Sin especificar'}
                     </div>
                   </TableCell>
                   <TableCell className="max-w-xs">
-                    <div className="truncate" title={licitacion.tipo_contratacion}>
-                      {licitacion.tipo_contratacion}
+                    <div className="truncate" title={licitacion.tipo_contratacion || ''}>
+                      {licitacion.tipo_contratacion || 'Sin especificar'}
                     </div>
                   </TableCell>
                   <TableCell className="money-text">
-                    {formatMoney(licitacion.monto)}
+                    {formatMoney(licitacion.monto || 0)}
                   </TableCell>
                   <TableCell>
                     {formatDate(licitacion.fecha_publicacion)}
                   </TableCell>
                   <TableCell>
-                    <Badge className={getBadgeColor(licitacion.fuente)}>
-                      {licitacion.fuente}
+                    <Badge className={getBadgeColor(licitacion.fuente || 'DESCONOCIDO')}>
+                      {licitacion.fuente || 'DESCONOCIDO'}
                     </Badge>
                   </TableCell>
                   <TableCell>
                     <Badge 
                       variant="secondary" 
-                      className={getEstadoBadgeColor(licitacion.estado)}
+                      className={getEstadoBadgeColor(licitacion.estado || 'DESCONOCIDO')}
                     >
-                      {licitacion.estado}
+                      {licitacion.estado || 'DESCONOCIDO'}
                     </Badge>
                   </TableCell>
                   <TableCell>
@@ -131,7 +132,7 @@ const DataTable = ({ data, loading, onPageChange, onViewDetails }: DataTableProp
         {/* Pagination */}
         <div className="flex items-center justify-between mt-6">
           <div className="text-sm text-muted-foreground">
-            Mostrando {(page - 1) * 50 + 1} - {Math.min(page * 50, total)} de {total.toLocaleString()} registros
+            Mostrando {Math.max((page - 1) * 50 + 1, 1)} - {Math.min(page * 50, total)} de {total.toLocaleString()} registros
           </div>
           <div className="flex items-center gap-2">
             <Button
