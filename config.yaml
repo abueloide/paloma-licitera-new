@@ -1,10 +1,10 @@
 # Configuración de Base de Datos
 database:
-  host: localhost
-  port: 5432
-  name: paloma_licitera
-  user: postgres
-  password: ""
+  host: ${DATABASE_HOST:-localhost}
+  port: ${DATABASE_PORT:-5432}
+  name: ${DATABASE_NAME:-paloma_licitera}
+  user: ${DATABASE_USER:-postgres}
+  password: ${DATABASE_PASSWORD:-}
 
 # Fuentes de Datos
 sources:
@@ -17,11 +17,46 @@ sources:
     enabled: true
     url: "https://www.dof.gob.mx"
     batch_size: 50
+    schedule:
+      matutino: "09:00"  # 9 AM
+      vespertino: "21:00"  # 9 PM
     
   tianguis:
     enabled: true
     url: "https://tianguisdigital.cdmx.gob.mx"
     batch_size: 200
+
+# Automatización
+automation:
+  scheduler:
+    enabled: true
+    timezone: "America/Mexico_City"
+    
+  batch_config:
+    diario: 
+      hora: "06:00"
+      fuentes: ["comprasmx", "dof", "tianguis"]
+    cada_6h:
+      horas: ["06:00", "12:00", "18:00", "00:00"]
+      fuentes: ["comprasmx", "tianguis"]
+    semanal:
+      dia: "domingo"
+      hora: "02:00"
+      fuentes: ["sitios-masivos"]
+      
+  dof_config:
+    check_times: ["09:00", "21:00"]  
+    retry_attempts: 3
+    retry_delay: 300  # 5 minutos
+      
+  historical_config:
+    chunk_size: 1000
+    max_pages_per_run: 50
+    delay_between_requests: 2
+    
+  incremental_config:
+    overlap_buffer: 10
+    max_empty_pages: 5
 
 # Directorios
 paths:
