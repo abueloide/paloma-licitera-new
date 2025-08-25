@@ -42,6 +42,10 @@ def main():
     # Comandos principales
     subparsers = parser.add_subparsers(dest='command', help='Comandos disponibles')
     
+    # 🚀 NUEVO: Comando descarga inicial
+    inicial_parser = subparsers.add_parser('descarga-inicial', help='🚀 Descarga inicial REAL de 12 meses')
+    inicial_parser.add_argument('--desde', required=True, help='Fecha desde (YYYY-MM-DD)')
+    
     # Comando histórico
     hist_parser = subparsers.add_parser('historico', help='Descarga histórica')
     hist_parser.add_argument('--fuente', required=True, choices=['all', 'comprasmx', 'dof', 'tianguis', 'sitios-masivos'])
@@ -82,7 +86,51 @@ def main():
         scheduler = SchedulerManager(args.config)
         
         # Ejecutar comando
-        if args.command == 'historico':
+        if args.command == 'descarga-inicial':
+            print("\n🚀 INICIANDO DESCARGA INICIAL COMPLETA DE 12 MESES")
+            print("=" * 60)
+            print("📊 Esta es la VERDADERA descarga inicial que obtiene:")
+            print("   • ComprasMX: ~50,000-100,000 licitaciones")
+            print("   • DOF: Todos los martes y jueves (~5,000-10,000)")
+            print("   • Tianguis Digital: ~10,000-20,000 licitaciones")
+            print("   • Sitios Masivos: ~5,000-15,000 licitaciones")
+            print("   • Tiempo estimado: 30-60 minutos")
+            print("=" * 60)
+            print()
+            
+            results = scheduler.run_descarga_inicial(args.desde)
+            
+            # Mostrar resultado especial para descarga inicial
+            if args.output == 'summary':
+                print("\n🎉 DESCARGA INICIAL COMPLETADA")
+                print("=" * 40)
+                totales = results.get('totales', {})
+                print(f"📊 Total insertado: {totales.get('inserted', 0):,} licitaciones")
+                print(f"📋 Fuentes procesadas: {totales.get('processed', 0)}/4")
+                print(f"🗓️ Fechas DOF procesadas: {totales.get('fechas_dof', 0)}")
+                print(f"⏱️ Duración: {results.get('duracion', 'N/A')}")
+                
+                if totales.get('errors', 0) > 0:
+                    print(f"⚠️ Errores: {totales.get('errors', 0)}")
+                
+                print("\n📈 DESGLOSE POR FUENTE:")
+                for fuente, detalle in results.get('fuentes_procesadas', {}).items():
+                    registros = detalle.get('registros_insertados', 0)
+                    if fuente == 'dof':
+                        fechas_info = f" ({detalle.get('fechas_procesadas', 0)} fechas)"
+                    else:
+                        fechas_info = ""
+                    
+                    status = "✅" if detalle.get('procesamiento_exitoso') else "❌"
+                    print(f"   {status} {fuente.upper()}: {registros:,} registros{fechas_info}")
+                
+                print("\n🎯 SIGUIENTE PASO:")
+                print("   Usa './run-scheduler.sh incremental' para actualizaciones")
+                print("   Usa './run-scheduler.sh status' para ver estadísticas")
+            else:
+                print_results(results, args.output)
+            
+        elif args.command == 'historico':
             results = scheduler.run_historical(args.fuente, args.desde)
             print_results(results, args.output)
             
