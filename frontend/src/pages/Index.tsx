@@ -1,7 +1,8 @@
-import Dashboard from '@/components/Dashboard';
+import React from 'react'
+import Dashboard from '../pages/Dashboard'
 
-const Index = () => {
-  return <Dashboard />;
-};
+const Index: React.FC = () => {
+  return <Dashboard />
+}
 
-export default Index;
+export default Index
