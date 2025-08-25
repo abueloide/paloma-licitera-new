@@ -1,0 +1,56 @@
+# ALTERNATIVA: Usar imagen base Python con instalación manual de dependencias
+FROM python:3.11-slim
+
+# Configurar variables de entorno
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+# Actualizar sistema e instalar dependencias manualmente
+RUN apt-get update && apt-get install -y \
+    postgresql-client \
+    wget \
+    curl \
+    ca-certificates \
+    # Dependencias específicas para Playwright/Chromium (versiones Debian)
+    libnss3 \
+    libnspr4 \
+    libatk-bridge2.0-0 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    libgbm1 \
+    libxss1 \
+    libasound2t64 \
+    libatspi2.0-0t64 \
+    libgtk-3-0t64 \
+    # Fuentes (versiones que existen en Debian)
+    fonts-unifont \
+    fonts-liberation \
+    fonts-noto-color-emoji \
+    # Limpiar cache
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copiar requirements y instalar dependencias Python
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Instalar browsers de Playwright SIN --with-deps (solo browsers)
+RUN python -m playwright install chromium
+
+# Copiar el resto del código
+COPY . .
+
+# Crear directorios necesarios
+RUN mkdir -p data/raw data/processed logs
+
+# Exponer puerto
+EXPOSE 8000
+
+# Comando por defecto
+CMD ["python", "src/api.py"]
