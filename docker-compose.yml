@@ -14,9 +14,10 @@ services:
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
 
   paloma-app:
     build: .
@@ -52,7 +53,7 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./config.yaml:/app/config.yaml
-    command: python -m src.scheduler --daemon
+    command: python -m src.scheduler daemon --interval 3600
     restart: unless-stopped
 
 volumes:
