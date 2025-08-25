@@ -12,7 +12,7 @@ import {
 } from '../types';
 
 // Configure axios base URL - use proxy in development, direct in production
-const baseURL = import.meta.env?.DEV ? '/api' : 'http://localhost:8000';
+const baseURL = import.meta.env.DEV ? '/api' : 'http://localhost:8000';
 
 const api = axios.create({
   baseURL,
@@ -23,10 +23,16 @@ const api = axios.create({
 });
 
 // Add request interceptor for debugging
-api.interceptors.request.use(request => {
-  console.log('API Request:', request.method?.toUpperCase(), request.url);
-  return request;
-});
+api.interceptors.request.use(
+  request => {
+    console.log('API Request:', request.method?.toUpperCase(), request.url);
+    return request;
+  },
+  error => {
+    console.error('Request Error:', error);
+    return Promise.reject(error);
+  }
+);
 
 // Add response interceptor for error handling
 api.interceptors.response.use(
@@ -35,7 +41,26 @@ api.interceptors.response.use(
     return response;
   },
   error => {
-    console.error('API Error:', error.response?.status, error.config?.url, error.message);
+    console.error('API Error:', {
+      status: error.response?.status,
+      url: error.config?.url,
+      message: error.message,
+      data: error.response?.data
+    });
+    
+    // Enhanced error message for common issues
+    if (error.code === 'ECONNREFUSED' || error.message.includes('Network Error')) {
+      error.userMessage = 'No se puede conectar al servidor. Verifique que el backend esté ejecutándose en http://localhost:8000';
+    } else if (error.response?.status >= 500) {
+      error.userMessage = 'Error interno del servidor. Por favor, intente nuevamente.';
+    } else if (error.response?.status === 404) {
+      error.userMessage = 'Recurso no encontrado.';
+    } else if (error.response?.status >= 400) {
+      error.userMessage = error.response?.data?.detail || 'Error en la solicitud.';
+    } else {
+      error.userMessage = 'Error de conexión. Verifique su conexión a internet.';
+    }
+    
     return Promise.reject(error);
   }
 );
@@ -43,73 +68,113 @@ api.interceptors.response.use(
 export const apiService = {
   // Basic info
   async getApiInfo() {
-    const response = await api.get('/');
-    return response.data;
+    try {
+      const response = await api.get('/');
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.userMessage || error.message);
+    }
   },
 
   // Statistics
   async getStatistics(): Promise<Statistics> {
-    const response = await api.get('/stats');
-    return response.data;
+    try {
+      const response = await api.get('/stats');
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.userMessage || error.message);
+    }
   },
 
   // Licitaciones with filters
   async getLicitaciones(filters: SearchFilters = {}): Promise<LicitacionesResponse> {
-    const params = new URLSearchParams();
-    
-    Object.entries(filters).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== '') {
-        params.append(key, value.toString());
-      }
-    });
+    try {
+      const params = new URLSearchParams();
+      
+      Object.entries(filters).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+          params.append(key, value.toString());
+        }
+      });
 
-    const response = await api.get(`/licitaciones?${params}`);
-    return response.data;
+      const response = await api.get(`/licitaciones?${params}`);
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.userMessage || error.message);
+    }
   },
 
   // Get single licitacion detail
   async getLicitacionDetail(id: number): Promise<Licitacion> {
-    const response = await api.get(`/detalle/${id}`);
-    return response.data;
+    try {
+      const response = await api.get(`/detalle/${id}`);
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.userMessage || error.message);
+    }
   },
 
   // Get available filters
   async getFilters(): Promise<Filtros> {
-    const response = await api.get('/filtros');
-    return response.data;
+    try {
+      const response = await api.get('/filtros');
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.userMessage || error.message);
+    }
   },
 
   // Quick search for autocomplete
   async quickSearch(query: string, limit: number = 10) {
-    const response = await api.get('/busqueda-rapida', {
-      params: { q: query, limit }
-    });
-    return response.data;
+    try {
+      const response = await api.get('/busqueda-rapida', {
+        params: { q: query, limit }
+      });
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.userMessage || error.message);
+    }
   },
 
   // Analysis endpoints
   async getAnalisisPorTipoContratacion(): Promise<AnalisisContratacion[]> {
-    const response = await api.get('/analisis/por-tipo-contratacion');
-    return response.data;
+    try {
+      const response = await api.get('/analisis/por-tipo-contratacion');
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.userMessage || error.message);
+    }
   },
 
   async getAnalisisPorDependencia(limit: number = 20): Promise<AnalisisDependencia[]> {
-    const response = await api.get('/analisis/por-dependencia', {
-      params: { limit }
-    });
-    return response.data;
+    try {
+      const response = await api.get('/analisis/por-dependencia', {
+        params: { limit }
+      });
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.userMessage || error.message);
+    }
   },
 
   async getAnalisisPorFuente(): Promise<AnalisisFuente[]> {
-    const response = await api.get('/analisis/por-fuente');
-    return response.data;
+    try {
+      const response = await api.get('/analisis/por-fuente');
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.userMessage || error.message);
+    }
   },
 
   async getAnalisisTemporal(granularidad: 'dia' | 'semana' | 'mes' | 'año' = 'mes'): Promise<AnalisisTemporal[]> {
-    const response = await api.get('/analisis/temporal', {
-      params: { granularidad }
-    });
-    return response.data;
+    try {
+      const response = await api.get('/analisis/temporal', {
+        params: { granularidad }
+      });
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.userMessage || error.message);
+    }
   }
 };
 
