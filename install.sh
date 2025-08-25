@@ -1,255 +1,452 @@
 #!/bin/bash
 
-# =================================================================
-# PALOMA LICITERA - SCRIPT DE INSTALACIÓN COMPLETO
-# =================================================================
-# Este script configura todo el entorno necesario para ejecutar
-# la plataforma Paloma Licitera de forma confiable
-# =================================================================
+# Colores para output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
 
-set -e  # Salir en caso de error
-
-echo "🐦 ===================================================="
+echo -e "${BLUE}🐦 ===================================================="
 echo "   PALOMA LICITERA - INSTALACIÓN COMPLETA"
-echo "===================================================="
+echo -e "====================================================${NC}"
 echo ""
 
-# ---------------------------------------------
-# 1. VERIFICAR PREREQUISITOS
-# ---------------------------------------------
-echo "📋 PASO 1: Verificando prerequisitos..."
+# Función para verificar comandos
+check_command() {
+    if ! command -v $1 &> /dev/null; then
+        echo -e "${RED}❌ $1 no encontrado${NC}"
+        return 1
+    else
+        VERSION=$($2)
+        echo -e "${GREEN}✅ $1 $VERSION encontrado${NC}"
+        return 0
+    fi
+}
+
+# PASO 1: Verificar prerequisitos
+echo -e "${YELLOW}📋 PASO 1: Verificando prerequisitos...${NC}"
 echo ""
 
 # Verificar Python 3
-if ! command -v python3 &> /dev/null; then
-    echo "❌ Python 3 no está instalado"
-    echo "   Por favor instala Python 3.9 o superior"
+if ! check_command "python3" "python3 --version 2>&1 | cut -d' ' -f2"; then
+    echo -e "${RED}Por favor instala Python 3.9 o superior${NC}"
     exit 1
 fi
-
-PYTHON_VERSION=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
-echo "✅ Python $PYTHON_VERSION encontrado"
 
 # Verificar Node.js
-if ! command -v node &> /dev/null; then
-    echo "❌ Node.js no está instalado"
-    echo "   Por favor instala Node.js 16 o superior"
+if ! check_command "node" "node --version"; then
+    echo -e "${RED}Por favor instala Node.js 18 o superior${NC}"
     exit 1
 fi
-
-NODE_VERSION=$(node --version)
-echo "✅ Node.js $NODE_VERSION encontrado"
 
 # Verificar npm
-if ! command -v npm &> /dev/null; then
-    echo "❌ npm no está instalado"
+if ! check_command "npm" "npm --version"; then
+    echo -e "${RED}Por favor instala npm${NC}"
     exit 1
 fi
-
-NPM_VERSION=$(npm --version)
-echo "✅ npm $NPM_VERSION encontrado"
 
 # Verificar PostgreSQL
 echo ""
-echo "🔍 Verificando PostgreSQL..."
-if ! command -v psql &> /dev/null; then
-    echo "⚠️  PostgreSQL no está instalado o psql no está en PATH"
-    echo "   La aplicación requiere PostgreSQL para funcionar"
-    echo "   ¿Continuar de todos modos? (y/N)"
-    read -r response
-    if [[ ! "$response" =~ ^[Yy]$ ]]; then
-        exit 1
-    fi
-else
+echo -e "${BLUE}🔍 Verificando PostgreSQL...${NC}"
+if command -v psql &> /dev/null; then
     PSQL_VERSION=$(psql --version | awk '{print $3}')
-    echo "✅ PostgreSQL $PSQL_VERSION encontrado"
+    echo -e "${GREEN}✅ PostgreSQL $PSQL_VERSION encontrado${NC}"
+else
+    echo -e "${YELLOW}⚠️  PostgreSQL no encontrado (opcional si usas remoto)${NC}"
 fi
 
-# ---------------------------------------------
-# 2. CREAR ENTORNO VIRTUAL PYTHON
-# ---------------------------------------------
+# PASO 2: Configurar entorno Python
 echo ""
-echo "📦 PASO 2: Configurando entorno Python..."
+echo -e "${YELLOW}📦 PASO 2: Configurando entorno Python...${NC}"
 echo ""
 
-# Verificar si ya existe un entorno virtual
+# Crear o recrear entorno virtual
 if [ -d "venv" ]; then
-    echo "🔄 Entorno virtual existente encontrado"
-    echo "   ¿Deseas recrearlo? (y/N)"
+    echo -e "${BLUE}🔄 Entorno virtual existente encontrado${NC}"
+    echo -n "   ¿Deseas recrearlo? (y/N): "
     read -r response
-    if [[ "$response" =~ ^[Yy]$ ]]; then
+    if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
         echo "   Eliminando entorno anterior..."
         rm -rf venv
         echo "   Creando nuevo entorno virtual..."
         python3 -m venv venv
     fi
 else
-    echo "📌 Creando entorno virtual..."
+    echo -e "${BLUE}📁 Creando entorno virtual...${NC}"
     python3 -m venv venv
 fi
 
 # Activar entorno virtual
-echo "🔌 Activando entorno virtual..."
+echo -e "${BLUE}🔌 Activando entorno virtual...${NC}"
 source venv/bin/activate
 
 # Actualizar pip
-echo "📈 Actualizando pip..."
-pip install --upgrade pip > /dev/null 2>&1
+echo -e "${BLUE}📈 Actualizando pip...${NC}"
+pip install --upgrade pip --quiet
 
-# ---------------------------------------------
-# 3. INSTALAR DEPENDENCIAS PYTHON
-# ---------------------------------------------
+# PASO 3: Instalar dependencias Python
 echo ""
-echo "📚 PASO 3: Instalando dependencias Python..."
+echo -e "${YELLOW}📚 PASO 3: Instalando dependencias Python...${NC}"
 echo ""
 
-# Verificar si requirements.txt existe
+# Crear requirements.txt si no existe
 if [ ! -f "requirements.txt" ]; then
-    echo "❌ requirements.txt no encontrado"
-    exit 1
+    echo -e "${BLUE}📝 Creando requirements.txt...${NC}"
+    cat > requirements.txt << 'REQ'
+# Core
+python-dotenv==1.0.0
+pyyaml==6.0.1
+
+# Database
+psycopg2-binary>=2.9.10
+sqlalchemy>=2.0.25
+
+# Web scraping
+playwright>=1.45.0
+beautifulsoup4==4.12.2
+requests==2.31.0
+
+# Data processing
+pandas>=2.2.0
+python-dateutil==2.8.2
+
+# API
+fastapi>=0.110.0
+uvicorn>=0.27.0
+pydantic>=2.6.0
+
+# Utils
+chardet==5.2.0
+REQ
 fi
 
-echo "📦 Instalando paquetes..."
+echo -e "${BLUE}📦 Instalando paquetes...${NC}"
 pip install -r requirements.txt
 
-# Verificar instalación de paquetes críticos
+# Verificar instalación
 echo ""
-echo "✔️  Verificando paquetes críticos..."
-python3 -c "import uvicorn" && echo "   ✅ uvicorn instalado" || echo "   ❌ uvicorn NO instalado"
-python3 -c "import fastapi" && echo "   ✅ fastapi instalado" || echo "   ❌ fastapi NO instalado"
-python3 -c "import psycopg2" && echo "   ✅ psycopg2 instalado" || echo "   ❌ psycopg2 NO instalado"
-python3 -c "import pandas" && echo "   ✅ pandas instalado" || echo "   ❌ pandas NO instalado"
-python3 -c "import playwright" && echo "   ✅ playwright instalado" || echo "   ❌ playwright NO instalado"
+echo -e "${GREEN}✔️  Verificando paquetes críticos...${NC}"
+for package in uvicorn fastapi psycopg2 pandas playwright; do
+    if pip show $package &> /dev/null; then
+        echo -e "   ${GREEN}✅ $package instalado${NC}"
+    else
+        echo -e "   ${RED}❌ $package NO instalado${NC}"
+    fi
+done
 
-# Instalar navegadores de Playwright si es necesario
+# Instalar navegadores para Playwright
 echo ""
-echo "🌐 Instalando navegadores para Playwright..."
-playwright install chromium
+echo -e "${BLUE}🌐 Instalando navegadores para Playwright...${NC}"
+playwright install chromium --quiet
 
-# ---------------------------------------------
-# 4. INSTALAR DEPENDENCIAS FRONTEND
-# ---------------------------------------------
+# PASO 4: Instalar dependencias Frontend
 echo ""
-echo "🎨 PASO 4: Instalando dependencias Frontend..."
+echo -e "${YELLOW}🎨 PASO 4: Instalando dependencias Frontend...${NC}"
 echo ""
 
 cd frontend
-
-# Limpiar node_modules si existe
-if [ -d "node_modules" ]; then
-    echo "🧹 Limpiando node_modules anterior..."
-    rm -rf node_modules
-fi
-
-# Limpiar caché de npm
-echo "🧹 Limpiando caché de npm..."
+echo -e "${BLUE}🧹 Limpiando caché de npm...${NC}"
 npm cache clean --force
 
-# Instalar dependencias
-echo "📦 Instalando paquetes npm..."
+echo -e "${BLUE}📦 Instalando paquetes npm...${NC}"
 npm install
 
 cd ..
 
-# ---------------------------------------------
-# 5. VERIFICAR CONFIGURACIÓN
-# ---------------------------------------------
+# PASO 5: Verificar configuración
 echo ""
-echo "⚙️  PASO 5: Verificando configuración..."
+echo -e "${YELLOW}⚙️  PASO 5: Verificando configuración...${NC}"
 echo ""
 
-# Verificar config.yaml
-if [ ! -f "config.yaml" ]; then
-    if [ -f "config.example.yaml" ]; then
-        echo "📋 Creando config.yaml desde ejemplo..."
-        cp config.example.yaml config.yaml
-        echo "   ⚠️  Por favor edita config.yaml con tus credenciales de PostgreSQL"
-    else
-        echo "❌ No se encontró config.yaml ni config.example.yaml"
-        exit 1
-    fi
+if [ -f "config.yaml" ]; then
+    echo -e "${GREEN}✅ config.yaml encontrado${NC}"
 else
-    echo "✅ config.yaml encontrado"
+    echo -e "${YELLOW}📝 Creando config.yaml de ejemplo...${NC}"
+    cat > config.yaml << 'CONFIG'
+database:
+  host: localhost
+  port: 5432
+  name: paloma_licitera
+  user: postgres
+  password: postgres
+
+api:
+  host: 0.0.0.0
+  port: 8000
+  reload: true
+
+scrapers:
+  tianguis:
+    enabled: true
+    base_url: "https://tianguisdigital.finanzas.cdmx.gob.mx"
+  comprasmx:
+    enabled: true
+    base_url: "https://comprasmx.hacienda.gob.mx"
+CONFIG
+    echo -e "${GREEN}✅ config.yaml creado${NC}"
 fi
 
-# ---------------------------------------------
-# 6. VERIFICAR BASE DE DATOS
-# ---------------------------------------------
+# PASO 6: Verificar base de datos
 echo ""
-echo "🗄️  PASO 6: Verificando base de datos..."
+echo -e "${YELLOW}🗄️  PASO 6: Verificando base de datos...${NC}"
 echo ""
 
-# Intentar conectar a PostgreSQL
 if command -v psql &> /dev/null; then
-    if psql -h localhost -U postgres -d paloma_licitera -c "SELECT 1" > /dev/null 2>&1; then
-        echo "✅ Conexión a PostgreSQL exitosa"
-        
-        # Contar registros
-        RECORD_COUNT=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT COUNT(*) FROM licitaciones;" 2>/dev/null || echo "0")
-        echo "📊 Base de datos contiene $RECORD_COUNT licitaciones"
+    # Intentar conectar a PostgreSQL
+    if psql -h localhost -U postgres -d paloma_licitera -c "SELECT COUNT(*) FROM licitaciones;" &> /dev/null; then
+        COUNT=$(psql -h localhost -U postgres -d paloma_licitera -t -c "SELECT COUNT(*) FROM licitaciones;" 2>/dev/null | xargs)
+        echo -e "${GREEN}✅ Conexión a PostgreSQL exitosa${NC}"
+        echo -e "${BLUE}📊 Base de datos contiene $COUNT licitaciones${NC}"
     else
-        echo "⚠️  No se pudo conectar a PostgreSQL"
-        echo "   Verifica que:"
-        echo "   1. PostgreSQL está ejecutándose"
-        echo "   2. La base de datos 'paloma_licitera' existe"
-        echo "   3. El usuario 'postgres' tiene permisos"
-        echo ""
-        echo "   Para crear la base de datos:"
-        echo "   $ psql -U postgres -c \"CREATE DATABASE paloma_licitera;\""
+        echo -e "${YELLOW}⚠️  No se pudo conectar a la base de datos${NC}"
+        echo "   Verifica que PostgreSQL esté ejecutándose y las credenciales en config.yaml"
     fi
 else
-    echo "⚠️  PostgreSQL no disponible para verificación"
+    echo -e "${YELLOW}⚠️  psql no encontrado, no se puede verificar la base de datos${NC}"
 fi
 
-# ---------------------------------------------
-# 7. CREAR DIRECTORIOS NECESARIOS
-# ---------------------------------------------
+# PASO 7: Actualizar scripts de inicio
 echo ""
-echo "📁 PASO 7: Creando directorios necesarios..."
+echo -e "${YELLOW}🚀 PASO 7: Creando scripts optimizados...${NC}"
 echo ""
 
+# Crear start_dashboard.sh mejorado
+cat > start_dashboard.sh << 'STARTSCRIPT'
+#!/bin/bash
+
+echo "🐦 Iniciando Paloma Licitera Dashboard..."
+
+# Activar entorno virtual si existe
+if [ -d "venv" ]; then
+    echo "🔌 Activando entorno virtual..."
+    source venv/bin/activate
+else
+    echo "⚠️  No se encontró entorno virtual. Ejecuta ./install.sh primero"
+    exit 1
+fi
+
+# Verificar PostgreSQL
+if command -v psql &> /dev/null; then
+    COUNT=$(psql -h localhost -U postgres -d paloma_licitera -t -c "SELECT COUNT(*) FROM licitaciones;" 2>/dev/null | xargs)
+    if [ ! -z "$COUNT" ]; then
+        echo "📊 Base de datos contiene $COUNT licitaciones"
+    fi
+fi
+
+# Crear directorio de logs
 mkdir -p logs
-mkdir -p data
-echo "✅ Directorios creados"
 
-# ---------------------------------------------
-# 8. CREAR SCRIPT DE INICIO MEJORADO
-# ---------------------------------------------
 echo ""
-echo "🚀 PASO 8: Actualizando scripts de inicio..."
+echo "🚀 Iniciando servicios..."
+
+# Matar procesos anteriores si existen
+if [ -f .backend.pid ]; then
+    OLD_PID=$(cat .backend.pid)
+    if ps -p $OLD_PID > /dev/null 2>&1; then
+        echo "   ⏹️  Deteniendo backend anterior..."
+        kill $OLD_PID 2>/dev/null
+    fi
+fi
+
+if [ -f .frontend.pid ]; then
+    OLD_PID=$(cat .frontend.pid)
+    if ps -p $OLD_PID > /dev/null 2>&1; then
+        echo "   ⏹️  Deteniendo frontend anterior..."
+        kill $OLD_PID 2>/dev/null
+    fi
+fi
+
+# Iniciar backend
+echo "   📡 Iniciando backend API (puerto 8000)..."
+python src/api.py > logs/backend.log 2>&1 &
+BACKEND_PID=$!
+
+# Verificar que el backend se inició
+sleep 2
+if ps -p $BACKEND_PID > /dev/null; then
+    echo "   ✅ Backend iniciado (PID: $BACKEND_PID)"
+    echo $BACKEND_PID > .backend.pid
+else
+    echo "   ❌ Error al iniciar el backend"
+    echo "   Ver logs en: logs/backend.log"
+    tail -n 20 logs/backend.log
+    exit 1
+fi
+
+# Esperar a que el backend esté listo
+echo "   ⏳ Esperando a que el backend esté listo..."
+for i in {1..10}; do
+    if curl -s http://localhost:8000/ > /dev/null 2>&1; then
+        echo "   ✅ Backend respondiendo correctamente"
+        break
+    fi
+    sleep 1
+done
+
+# Iniciar frontend
+echo "   🎨 Iniciando frontend (puerto 5173)..."
+cd frontend && npm run dev > ../logs/frontend.log 2>&1 &
+FRONTEND_PID=$!
+cd ..
+
+# Verificar que el frontend se inició
+sleep 2
+if ps -p $FRONTEND_PID > /dev/null; then
+    echo "   ✅ Frontend iniciado (PID: $FRONTEND_PID)"
+    echo $FRONTEND_PID > .frontend.pid
+else
+    echo "   ❌ Error al iniciar el frontend"
+    echo "   Ver logs en: logs/frontend.log"
+    exit 1
+fi
+
 echo ""
+echo "======================================"
+echo "✅ Dashboard iniciado correctamente"
+echo "======================================"
+echo ""
+echo "🌐 Abrir en el navegador:"
+echo "   http://localhost:5173"
+echo ""
+echo "📊 API disponible en:"
+echo "   http://localhost:8000"
+echo "   http://localhost:8000/docs (Swagger UI)"
+echo ""
+echo "📝 Logs disponibles en:"
+echo "   - Backend: logs/backend.log"
+echo "   - Frontend: logs/frontend.log"
+echo ""
+echo "⏹️  Para detener: ./stop_dashboard.sh"
+echo ""
+
+# Abrir navegador automáticamente
+sleep 2
+if command -v open &> /dev/null; then
+    open http://localhost:5173
+elif command -v xdg-open &> /dev/null; then
+    xdg-open http://localhost:5173
+fi
+
+# Mantener el script corriendo y mostrar logs
+echo "📋 Presiona Ctrl+C para detener todos los servicios"
+echo ""
+
+# Trap para limpiar al salir
+trap 'echo ""; echo "⏹️  Deteniendo servicios..."; ./stop_dashboard.sh; exit' INT TERM
+
+# Mantener el script vivo
+wait
+STARTSCRIPT
+
+# Crear stop_dashboard.sh mejorado
+cat > stop_dashboard.sh << 'STOPSCRIPT'
+#!/bin/bash
+
+echo "⏹️  Deteniendo Paloma Licitera Dashboard..."
+
+# Detener backend
+if [ -f .backend.pid ]; then
+    BACKEND_PID=$(cat .backend.pid)
+    if ps -p $BACKEND_PID > /dev/null 2>&1; then
+        echo "   Deteniendo backend (PID: $BACKEND_PID)..."
+        kill $BACKEND_PID 2>/dev/null
+        sleep 1
+        # Forzar si no se detuvo
+        if ps -p $BACKEND_PID > /dev/null 2>&1; then
+            kill -9 $BACKEND_PID 2>/dev/null
+        fi
+        echo "   ✅ Backend detenido"
+    else
+        echo "   ℹ️  Backend no estaba ejecutándose"
+    fi
+    rm -f .backend.pid
+else
+    echo "   ℹ️  No se encontró PID del backend"
+fi
+
+# Detener frontend
+if [ -f .frontend.pid ]; then
+    FRONTEND_PID=$(cat .frontend.pid)
+    if ps -p $FRONTEND_PID > /dev/null 2>&1; then
+        echo "   Deteniendo frontend (PID: $FRONTEND_PID)..."
+        kill $FRONTEND_PID 2>/dev/null
+        sleep 1
+        # Forzar si no se detuvo
+        if ps -p $FRONTEND_PID > /dev/null 2>&1; then
+            kill -9 $FRONTEND_PID 2>/dev/null
+        fi
+        echo "   ✅ Frontend detenido"
+    else
+        echo "   ℹ️  Frontend no estaba ejecutándose"
+    fi
+    rm -f .frontend.pid
+else
+    echo "   ℹ️  No se encontró PID del frontend"
+fi
+
+# Limpiar cualquier proceso huérfano
+echo "   🧹 Limpiando procesos huérfanos..."
+pkill -f "npm run dev" 2>/dev/null
+pkill -f "vite" 2>/dev/null
+pkill -f "python src/api.py" 2>/dev/null
+pkill -f "uvicorn" 2>/dev/null
+
+echo ""
+echo "✅ Dashboard detenido completamente"
+STOPSCRIPT
 
 # Hacer ejecutables los scripts
 chmod +x start_dashboard.sh
 chmod +x stop_dashboard.sh
-echo "✅ Scripts marcados como ejecutables"
 
-# ---------------------------------------------
-# RESUMEN FINAL
-# ---------------------------------------------
+echo -e "${GREEN}✅ Scripts creados y marcados como ejecutables${NC}"
+
+# PASO 8: Crear directorios necesarios
 echo ""
-echo "===================================================="
+echo -e "${YELLOW}📁 PASO 8: Creando directorios necesarios...${NC}"
+echo ""
+
+mkdir -p logs
+mkdir -p data
+mkdir -p exports
+
+echo -e "${GREEN}✅ Directorios creados${NC}"
+
+# Resumen final
+echo ""
+echo -e "${GREEN}===================================================="
 echo "✅ INSTALACIÓN COMPLETADA CON ÉXITO"
-echo "===================================================="
+echo "====================================================${NC}"
 echo ""
-echo "📋 Resumen de la instalación:"
-echo "   • Python $PYTHON_VERSION con entorno virtual"
-echo "   • Node.js $NODE_VERSION con npm $NPM_VERSION"
+echo -e "${BLUE}📋 Resumen de la instalación:${NC}"
+echo "   • Python con entorno virtual en: venv/"
 echo "   • Dependencias Python instaladas"
 echo "   • Dependencias Frontend instaladas"
+echo "   • Scripts de inicio actualizados"
 echo "   • Configuración verificada"
 echo ""
-echo "🚀 Para iniciar la aplicación:"
+echo -e "${YELLOW}🚀 Para iniciar la aplicación:${NC}"
 echo ""
-echo "   ./start_dashboard.sh"
+echo "   ${GREEN}./start_dashboard.sh${NC}"
 echo ""
-echo "⏹️  Para detener la aplicación:"
+echo -e "${YELLOW}⏹️  Para detener la aplicación:${NC}"
 echo ""
-echo "   ./stop_dashboard.sh"
+echo "   ${GREEN}./stop_dashboard.sh${NC}"
 echo ""
-echo "📝 IMPORTANTE:"
+echo -e "${BLUE}📝 NOTAS IMPORTANTES:${NC}"
+echo "   • El script activa automáticamente el entorno virtual"
+echo "   • Los logs se guardan en logs/"
 echo "   • Asegúrate de que PostgreSQL esté ejecutándose"
 echo "   • Verifica las credenciales en config.yaml"
-echo "   • Los logs se guardarán en logs/"
 echo ""
-echo "¡Listo para usar! 🎉"
+echo -e "${GREEN}¡Listo para usar! 🎉${NC}"
+
+# Preguntar si quiere iniciar ahora
+echo ""
+echo -n "¿Deseas iniciar el dashboard ahora? (y/N): "
+read -r response
+if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+    echo ""
+    ./start_dashboard.sh
+fi
