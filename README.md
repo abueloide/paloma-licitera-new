@@ -7,7 +7,7 @@ Sistema de monitoreo y análisis de licitaciones gubernamentales de México.
 ### Prerrequisitos
 - Python 3.8+
 - Node.js 16+
-- SQLite (incluido)
+- PostgreSQL 12+
 
 ### Instalación y Ejecución
 
@@ -163,7 +163,7 @@ python -m src.etl
 ```
 2. Verificar que la base de datos tenga datos:
 ```bash
-sqlite3 licitaciones.db "SELECT COUNT(*) FROM licitaciones;"
+psql -h localhost -U postgres -d paloma_licitera -c "SELECT COUNT(*) FROM licitaciones;"
 ```
 
 ### Errores al instalar dependencias
@@ -179,7 +179,7 @@ pip install --upgrade -r requirements.txt
 
 ### Backend
 - **FastAPI** - Framework web moderno para Python
-- **SQLite** - Base de datos ligera
+- **PostgreSQL** - Base de datos robusta y escalable
 - **Pandas** - Manipulación y análisis de datos
 - **BeautifulSoup4** - Web scraping
 - **Uvicorn** - Servidor ASGI
