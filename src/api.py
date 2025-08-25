@@ -16,6 +16,7 @@ import logging
 from contextlib import contextmanager
 from decimal import Decimal
 import json
+import os
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -37,8 +38,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Cargar configuración
-with open('config.yaml', 'r') as f:
+# Cargar configuración - buscar en el directorio padre (raíz del proyecto)
+config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.yaml')
+with open(config_path, 'r') as f:
     config = yaml.safe_load(f)
 db_config = config['database']
 
