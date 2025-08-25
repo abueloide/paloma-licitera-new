@@ -21,8 +21,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Instalar solo chromium browser sin dependencias del sistema
-RUN python -c "import playwright; playwright.install(['chromium'])"
+# Instalar solo chromium browser usando el CLI correcto
+RUN python -m playwright install chromium
 
 # Copiar el resto del código
 COPY . .
