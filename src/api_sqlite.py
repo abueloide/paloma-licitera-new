@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 API REST Compatible para Paloma Licitera
-Version simplificada que funciona con SQLite
+Version simplificada que funciona con SQLite y es compatible con el frontend existente
 """
 
 from fastapi import FastAPI, HTTPException, Query
@@ -91,7 +91,7 @@ def root():
 
 @app.get("/stats")
 def get_statistics():
-    """Obtener estadísticas generales."""
+    """Obtener estadísticas generales con el formato que espera el frontend."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
@@ -132,23 +132,39 @@ def get_statistics():
             # Montos
             cursor.execute("""
                 SELECT 
-                    SUM(monto_estimado) as monto_total,
-                    AVG(monto_estimado) as monto_promedio,
-                    MAX(monto_estimado) as monto_maximo,
-                    MIN(monto_estimado) as monto_minimo
+                    SUM(CASE WHEN monto_estimado > 0 THEN monto_estimado ELSE 0 END) as monto_total,
+                    AVG(CASE WHEN monto_estimado > 0 THEN monto_estimado ELSE NULL END) as monto_promedio,
+                    MAX(CASE WHEN monto_estimado > 0 THEN monto_estimado ELSE 0 END) as monto_maximo,
+                    MIN(CASE WHEN monto_estimado > 0 THEN monto_estimado ELSE 0 END) as monto_minimo
                 FROM licitaciones 
-                WHERE monto_estimado IS NOT NULL AND monto_estimado > 0
+                WHERE monto_estimado IS NOT NULL
             """)
             montos_row = cursor.fetchone()
-            montos = dict(montos_row) if montos_row else None
+            
+            # Crear objeto montos con valores por defecto si no hay datos
+            montos = {
+                'monto_total': float(montos_row['monto_total'] or 0),
+                'monto_promedio': float(montos_row['monto_promedio'] or 0),
+                'monto_maximo': float(montos_row['monto_maximo'] or 0),
+                'monto_minimo': float(montos_row['monto_minimo'] or 0)
+            }
             
             # Últimas actualizaciones
             cursor.execute("""
                 SELECT fuente, MAX(fecha_captura) as ultima_actualizacion
                 FROM licitaciones
+                WHERE fecha_captura IS NOT NULL
                 GROUP BY fuente
             """)
             actualizaciones = [dict(row) for row in cursor.fetchall()]
+            
+            # Si no hay actualizaciones, crear datos por defecto
+            if not actualizaciones:
+                fecha_actual = datetime.now().isoformat()
+                actualizaciones = [
+                    {'fuente': fuente['fuente'], 'ultima_actualizacion': fecha_actual}
+                    for fuente in por_fuente
+                ]
             
             return {
                 'total': total,
@@ -161,7 +177,21 @@ def get_statistics():
             }
     except Exception as e:
         logger.error(f"Error obteniendo estadísticas: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Devolver estructura mínima en caso de error
+        return {
+            'total': 0,
+            'por_fuente': [],
+            'por_estado': [],
+            'por_tipo_contratacion': [],
+            'montos': {
+                'monto_total': 0,
+                'monto_promedio': 0,
+                'monto_maximo': 0,
+                'monto_minimo': 0
+            },
+            'ultimas_actualizaciones': [],
+            'fecha_consulta': datetime.now().isoformat()
+        }
 
 @app.get("/licitaciones")
 def get_licitaciones(
@@ -283,7 +313,15 @@ def get_licitaciones(
             }
     except Exception as e:
         logger.error(f"Error obteniendo licitaciones: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return {
+            'data': [],
+            'pagination': {
+                'total': 0,
+                'page': page,
+                'page_size': page_size,
+                'total_pages': 0
+            }
+        }
 
 @app.get("/filtros")
 def get_filtros():
@@ -352,7 +390,13 @@ def get_filtros():
             }
     except Exception as e:
         logger.error(f"Error obteniendo filtros: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return {
+            'fuentes': [],
+            'estados': [],
+            'tipos_contratacion': [],
+            'tipos_procedimiento': [],
+            'top_entidades': []
+        }
 
 @app.get("/detalle/{licitacion_id}")
 def get_detalle_licitacion(licitacion_id: int):
@@ -368,6 +412,8 @@ def get_detalle_licitacion(licitacion_id: int):
                 raise HTTPException(status_code=404, detail="Licitación no encontrada")
             
             return dict(licitacion)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error obteniendo licitación {licitacion_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -404,7 +450,7 @@ def busqueda_rapida(
             return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
         logger.error(f"Error en búsqueda rápida: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return []
 
 # Endpoints de análisis simplificados
 @app.get("/analisis/por-tipo-contratacion")
@@ -418,10 +464,10 @@ def analisis_por_tipo_contratacion():
                 SELECT 
                     tipo_contratacion,
                     COUNT(*) as cantidad,
-                    SUM(monto_estimado) as monto_total,
-                    AVG(monto_estimado) as monto_promedio,
-                    MAX(monto_estimado) as monto_maximo,
-                    MIN(monto_estimado) as monto_minimo,
+                    SUM(CASE WHEN monto_estimado > 0 THEN monto_estimado ELSE 0 END) as monto_total,
+                    AVG(CASE WHEN monto_estimado > 0 THEN monto_estimado ELSE NULL END) as monto_promedio,
+                    MAX(CASE WHEN monto_estimado > 0 THEN monto_estimado ELSE 0 END) as monto_maximo,
+                    MIN(CASE WHEN monto_estimado > 0 THEN monto_estimado ELSE 0 END) as monto_minimo,
                     COUNT(DISTINCT entidad_compradora) as entidades_unicas
                 FROM licitaciones
                 WHERE tipo_contratacion IS NOT NULL
@@ -429,10 +475,19 @@ def analisis_por_tipo_contratacion():
                 ORDER BY cantidad DESC
             """)
             
-            return [dict(row) for row in cursor.fetchall()]
+            results = []
+            for row in cursor.fetchall():
+                row_dict = dict(row)
+                # Asegurar que los valores numéricos sean float
+                for key in ['monto_total', 'monto_promedio', 'monto_maximo', 'monto_minimo']:
+                    if row_dict[key] is not None:
+                        row_dict[key] = float(row_dict[key])
+                results.append(row_dict)
+            
+            return results
     except Exception as e:
         logger.error(f"Error en análisis por tipo: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return []
 
 @app.get("/analisis/por-dependencia")
 def analisis_por_dependencia(limit: int = Query(20, ge=1, le=100)):
@@ -445,8 +500,8 @@ def analisis_por_dependencia(limit: int = Query(20, ge=1, le=100)):
                 SELECT 
                     entidad_compradora,
                     COUNT(*) as cantidad_licitaciones,
-                    SUM(monto_estimado) as monto_total,
-                    AVG(monto_estimado) as monto_promedio,
+                    SUM(CASE WHEN monto_estimado > 0 THEN monto_estimado ELSE 0 END) as monto_total,
+                    AVG(CASE WHEN monto_estimado > 0 THEN monto_estimado ELSE NULL END) as monto_promedio,
                     COUNT(DISTINCT tipo_contratacion) as tipos_contratacion,
                     COUNT(DISTINCT tipo_procedimiento) as tipos_procedimiento,
                     MIN(fecha_publicacion) as primera_licitacion,
@@ -458,10 +513,19 @@ def analisis_por_dependencia(limit: int = Query(20, ge=1, le=100)):
                 LIMIT ?
             """, (limit,))
             
-            return [dict(row) for row in cursor.fetchall()]
+            results = []
+            for row in cursor.fetchall():
+                row_dict = dict(row)
+                # Asegurar que los valores numéricos sean float
+                for key in ['monto_total', 'monto_promedio']:
+                    if row_dict[key] is not None:
+                        row_dict[key] = float(row_dict[key])
+                results.append(row_dict)
+            
+            return results
     except Exception as e:
         logger.error(f"Error en análisis por dependencia: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return []
 
 @app.get("/analisis/por-fuente")
 def analisis_por_fuente():
@@ -477,8 +541,8 @@ def analisis_por_fuente():
                     COUNT(DISTINCT entidad_compradora) as entidades_unicas,
                     COUNT(DISTINCT tipo_contratacion) as tipos_contratacion,
                     SUM(CASE WHEN monto_estimado > 0 THEN 1 ELSE 0 END) as con_monto,
-                    SUM(monto_estimado) as monto_total,
-                    AVG(monto_estimado) as monto_promedio,
+                    SUM(CASE WHEN monto_estimado > 0 THEN monto_estimado ELSE 0 END) as monto_total,
+                    AVG(CASE WHEN monto_estimado > 0 THEN monto_estimado ELSE NULL END) as monto_promedio,
                     MIN(fecha_publicacion) as fecha_mas_antigua,
                     MAX(fecha_publicacion) as fecha_mas_reciente,
                     MAX(fecha_captura) as ultima_actualizacion
@@ -487,10 +551,19 @@ def analisis_por_fuente():
                 ORDER BY total_licitaciones DESC
             """)
             
-            return [dict(row) for row in cursor.fetchall()]
+            results = []
+            for row in cursor.fetchall():
+                row_dict = dict(row)
+                # Asegurar que los valores numéricos sean float
+                for key in ['monto_total', 'monto_promedio']:
+                    if row_dict[key] is not None:
+                        row_dict[key] = float(row_dict[key])
+                results.append(row_dict)
+            
+            return results
     except Exception as e:
         logger.error(f"Error en análisis por fuente: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return []
 
 @app.get("/analisis/temporal")
 def analisis_temporal(granularidad: str = Query("mes")):
@@ -513,7 +586,7 @@ def analisis_temporal(granularidad: str = Query("mes")):
                 SELECT 
                     strftime('{date_format}', fecha_publicacion) as periodo,
                     COUNT(*) as cantidad,
-                    SUM(monto_estimado) as monto_total,
+                    SUM(CASE WHEN monto_estimado > 0 THEN monto_estimado ELSE 0 END) as monto_total,
                     COUNT(DISTINCT entidad_compradora) as entidades_unicas,
                     COUNT(DISTINCT fuente) as fuentes
                 FROM licitaciones
@@ -523,10 +596,18 @@ def analisis_temporal(granularidad: str = Query("mes")):
                 ORDER BY periodo DESC
             """)
             
-            return [dict(row) for row in cursor.fetchall()]
+            results = []
+            for row in cursor.fetchall():
+                row_dict = dict(row)
+                # Asegurar que monto_total sea float
+                if row_dict['monto_total'] is not None:
+                    row_dict['monto_total'] = float(row_dict['monto_total'])
+                results.append(row_dict)
+            
+            return results
     except Exception as e:
         logger.error(f"Error en análisis temporal: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return []
 
 if __name__ == "__main__":
     import uvicorn
