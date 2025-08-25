@@ -114,14 +114,21 @@ class DOFWrapper(BaseWrapper):
             logger.info("DOF: No es martes ni jueves, saltando...")
             return False
         
-        # Verificar horarios de publicación
+        # Verificar horarios de publicación - EXACTAMENTE 9:00 AM y 9:00 PM
         current_time = now.time()
-        matutino_time = datetime.strptime("09:30", "%H:%M").time()  # 30 min después
-        vespertino_time = datetime.strptime("21:30", "%H:%M").time()  # 30 min después
+        matutino_time = datetime.strptime("09:00", "%H:%M").time()  # 9:00 AM exacto
+        vespertino_time = datetime.strptime("21:00", "%H:%M").time()  # 9:00 PM exacto
         
-        # Solo ejecutar después de horarios de publicación
-        if current_time < matutino_time:
-            logger.info("DOF: Muy temprano para matutino")
+        # Solo ejecutar en los horarios exactos (con ventana de 1 hora)
+        matutino_end = datetime.strptime("10:00", "%H:%M").time()
+        vespertino_end = datetime.strptime("22:00", "%H:%M").time()
+        
+        # Verificar si estamos en ventana matutina (9:00-10:00) o vespertina (21:00-22:00)
+        in_matutino_window = matutino_time <= current_time < matutino_end
+        in_vespertino_window = vespertino_time <= current_time < vespertino_end
+        
+        if not (in_matutino_window or in_vespertino_window):
+            logger.info(f"DOF: Fuera de horarios de ejecución. Hora actual: {current_time.strftime('%H:%M')}")
             return False
         
         # Verificar si ya procesamos hoy
@@ -129,6 +136,7 @@ class DOFWrapper(BaseWrapper):
             logger.info("DOF: Ya procesado hoy")
             return False
         
+        logger.info(f"DOF: Ejecutando en horario {'matutino' if in_matutino_window else 'vespertino'}")
         return True
     
     def run_scraper(self, modo: str = "normal", **kwargs) -> bool:
