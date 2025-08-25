@@ -318,19 +318,32 @@ if [ "$DOCKER_INSTALL" = true ]; then
         docker-compose logs --tail=20 paloma-app
     fi
 
-    # PASO 7: DESCARGA INICIAL REAL (12 MESES)
+    # 🚀 PASO 7: DESCARGA INICIAL REAL (12 MESES) - NUEVA IMPLEMENTACIÓN
     echo ""
-    echo -e "${YELLOW}📊 PASO 7: Descarga inicial de datos (12 meses)${NC}"
-    echo ""
-    
-    echo -e "${BLUE}💡 DESCARGA INICIAL = Últimos 12 meses de licitaciones${NC}"
-    echo "   • ComprasMX: ~50,000-100,000 registros"
-    echo "   • DOF: ~5,000-10,000 registros" 
-    echo "   • Tianguis Digital: ~10,000-20,000 registros"
-    echo "   • Tiempo estimado: 30-60 minutos"
+    echo -e "${CYAN}🚀 PASO 7: DESCARGA INICIAL REAL DE 12 MESES${NC}"
+    echo -e "${CYAN}=====================================================${NC}"
     echo ""
     
-    echo -n "¿Ejecutar descarga inicial completa (12 meses)? (Y/n): "
+    echo -e "${PURPLE}💡 DESCARGA INICIAL COMPLETAMENTE NUEVA:${NC}"
+    echo "   🎯 Esta NO es una descarga 'incremental'"
+    echo "   🎯 Es una descarga HISTÓRICA MASIVA que obtiene:"
+    echo ""
+    echo -e "${GREEN}📊 EXPECTATIVAS REALISTAS:${NC}"
+    echo "   • ComprasMX: ~50,000-100,000 licitaciones"
+    echo "   • DOF: Todos los martes y jueves (~5,000-10,000)"
+    echo "   • Tianguis Digital: ~10,000-20,000 licitaciones" 
+    echo "   • Sitios Masivos: ~5,000-15,000 licitaciones"
+    echo ""
+    echo -e "${YELLOW}⏱️  TIEMPO ESTIMADO: 30-60 minutos${NC}"
+    echo "   (Dependiendo de tu conexión a internet)"
+    echo ""
+    echo -e "${BLUE}🔧 PROCESO TÉCNICO:${NC}"
+    echo "   • ComprasMX/Tianguis: Descarga masiva hasta 12 meses"
+    echo "   • DOF: Genera y procesa TODAS las fechas martes/jueves"
+    echo "   • Sitios Masivos: Recorre todos los sitios disponibles"
+    echo ""
+    
+    echo -n "¿Ejecutar DESCARGA INICIAL REAL de 12 meses? (Y/n): "
     read -r response
     if [[ ! "$response" =~ ^([nN][oO]|[nN])$ ]]; then
         # Calcular fecha de hace 12 meses
@@ -345,30 +358,59 @@ if [ "$DOCKER_INSTALL" = true ]; then
             FECHA_INICIAL=$(date -d "12 months ago" +%Y-%m-%d)
         fi
         
-        echo -e "${GREEN}🗓️  Descargando desde: $FECHA_INICIAL${NC}"
-        echo -e "${BLUE}🔄 Iniciando descarga histórica de 12 meses...${NC}"
-        echo -e "${YELLOW}   ⏳ Esto tomará tiempo, mantén la terminal abierta...${NC}"
+        echo ""
+        echo -e "${GREEN}🗓️  Fecha de inicio calculada: $FECHA_INICIAL${NC}"
+        echo -e "${PURPLE}🚀 INICIANDO DESCARGA INICIAL REAL...${NC}"
+        echo -e "${YELLOW}   ⏳ MANTÉN LA TERMINAL ABIERTA durante todo el proceso${NC}"
+        echo -e "${YELLOW}   ⏳ Este proceso puede tomar hasta 1 hora${NC}"
+        echo ""
         
         sleep 5  # Tiempo para que el scheduler esté completamente listo
         
-        if ./run-scheduler.sh historico --fuente=all --desde="$FECHA_INICIAL"; then
-            echo -e "${GREEN}✅ Descarga inicial completada${NC}"
-            
-            # Mostrar estadísticas
+        # 🎯 USAR EL NUEVO COMANDO DE DESCARGA INICIAL
+        echo -e "${CYAN}📊 Ejecutando: descarga-inicial --desde=$FECHA_INICIAL${NC}"
+        if ./run-scheduler.sh descarga-inicial --desde="$FECHA_INICIAL"; then
             echo ""
-            echo -e "${CYAN}📊 ESTADÍSTICAS DE DESCARGA:${NC}"
-            ./run-scheduler.sh status | grep -A 10 "by_source" || echo "   Ver estadísticas en: ./run-scheduler.sh status"
+            echo -e "${GREEN}🎉 DESCARGA INICIAL REAL COMPLETADA EXITOSAMENTE${NC}"
+            echo -e "${GREEN}=================================================${NC}"
+            echo ""
+            
+            # Mostrar estadísticas finales
+            echo -e "${CYAN}📈 ESTADÍSTICAS FINALES:${NC}"
+            ./run-scheduler.sh status | grep -A 20 "by_source" || echo "   Ver estadísticas completas: ./run-scheduler.sh status"
+            echo ""
+            
+            echo -e "${BLUE}🎯 PRÓXIMOS PASOS:${NC}"
+            echo "   • Dashboard listo en: http://localhost:8000"
+            echo "   • Para actualizaciones: ./run-scheduler.sh incremental"
+            echo "   • Ver estadísticas: ./run-scheduler.sh status"
             
         else
-            echo -e "${YELLOW}⚠️  Error en descarga inicial, pero el sistema está funcionando${NC}"
-            echo "   Puedes intentar más tarde con:"
-            echo "   ./run-scheduler.sh historico --fuente=all --desde=$FECHA_INICIAL"
+            echo ""
+            echo -e "${YELLOW}⚠️  DESCARGA INICIAL CON ERRORES${NC}"
+            echo -e "${YELLOW}   El sistema está funcionando, pero algunos datos pueden faltar${NC}"
+            echo ""
+            echo -e "${BLUE}🔧 OPCIONES:${NC}"
+            echo "   1. Ver logs: docker-compose logs scheduler"
+            echo "   2. Reintentar: ./run-scheduler.sh descarga-inicial --desde=$FECHA_INICIAL"
+            echo "   3. Actualización incremental: ./run-scheduler.sh incremental"
+            echo "   4. Ver estado: ./run-scheduler.sh status"
         fi
     else
-        echo -e "${YELLOW}ℹ️  Descarga inicial omitida${NC}"
-        echo "   Puedes ejecutar después:"
-        echo "   ./run-scheduler.sh historico --fuente=all --desde=2024-01-01"
-        echo "   ./run-scheduler.sh incremental  # Solo nuevas licitaciones"
+        echo ""
+        echo -e "${YELLOW}ℹ️  DESCARGA INICIAL OMITIDA${NC}"
+        echo -e "${YELLOW}   El sistema está instalado pero SIN DATOS${NC}"
+        echo ""
+        echo -e "${BLUE}🔧 PARA OBTENER DATOS DESPUÉS:${NC}"
+        echo ""
+        echo -e "${GREEN}   DESCARGA INICIAL COMPLETA (recomendado):${NC}"
+        echo "   ./run-scheduler.sh descarga-inicial --desde=2024-01-01"
+        echo ""
+        echo -e "${YELLOW}   DESCARGA INCREMENTAL (solo nuevos):${NC}"
+        echo "   ./run-scheduler.sh incremental"
+        echo ""
+        echo -e "${CYAN}   VER ESTADO:${NC}"
+        echo "   ./run-scheduler.sh status"
     fi
 
 else
@@ -408,16 +450,18 @@ if [ "$DOCKER_INSTALL" = true ]; then
     echo "   • Dashboard: http://localhost:8000"
     echo "   • API Docs: http://localhost:8000/docs"
     echo ""
-    echo -e "${YELLOW}🚀 COMANDOS ÚTILES:${NC}"
+    echo -e "${YELLOW}🚀 COMANDOS PRINCIPALES:${NC}"
     echo ""
-    echo -e "   ${GREEN}./run-scheduler.sh status${NC}          # Ver estado y estadísticas"
-    echo -e "   ${GREEN}./run-scheduler.sh incremental${NC}     # Nuevas licitaciones"
-    echo -e "   ${GREEN}./run-scheduler.sh historico --fuente=comprasmx --desde=2024-06-01${NC}  # Histórico específico"
-    echo -e "   ${GREEN}docker-compose logs -f${NC}            # Ver logs"
-    echo -e "   ${GREEN}./docker-stop.sh${NC}                  # Detener"
-    echo -e "   ${GREEN}./cleanup.sh${NC}                      # Limpiar"
+    echo -e "${GREEN}   ./run-scheduler.sh status${NC}                    # Ver estado y estadísticas"
+    echo -e "${GREEN}   ./run-scheduler.sh incremental${NC}               # Nuevas licitaciones"
+    echo -e "${GREEN}   ./run-scheduler.sh descarga-inicial --desde=2024-01-01${NC}  # Descarga inicial completa"
     echo ""
-    echo -e "${BLUE}🔧 TROUBLESHOOTING:${NC}"
+    echo -e "${BLUE}🔧 COMANDOS DE SISTEMA:${NC}"
+    echo -e "${BLUE}   docker-compose logs -f${NC}              # Ver logs"
+    echo -e "${BLUE}   ./docker-stop.sh${NC}                    # Detener"
+    echo -e "${BLUE}   ./cleanup.sh${NC}                        # Limpiar"
+    echo ""
+    echo -e "${CYAN}🔍 TROUBLESHOOTING:${NC}"
     echo "   • Logs PostgreSQL: docker-compose logs postgres"
     echo "   • Logs API: docker-compose logs paloma-app"
     echo "   • Logs Scheduler: docker-compose logs scheduler"
