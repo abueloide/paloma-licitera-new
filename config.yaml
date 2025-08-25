@@ -1,10 +1,10 @@
 # Configuración de Base de Datos
 database:
-  host: ${DATABASE_HOST:-localhost}
-  port: ${DATABASE_PORT:-5432}
-  name: ${DATABASE_NAME:-paloma_licitera}
-  user: ${DATABASE_USER:-postgres}
-  password: ${DATABASE_PASSWORD:-}
+  host: localhost
+  port: 5432
+  name: paloma_licitera
+  user: postgres
+  password: ""
 
 # Fuentes de Datos
 sources:
