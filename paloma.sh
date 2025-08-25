@@ -87,6 +87,10 @@ case $COMMAND in
             exit 1
         fi
         
+        # Limpiar procesos anteriores
+        lsof -ti:8000 | xargs kill -9 2>/dev/null || true
+        lsof -ti:3001 | xargs kill -9 2>/dev/null || true
+        
         # Iniciar backend
         print_status "Iniciando backend en http://localhost:8000..."
         source venv/bin/activate
@@ -94,13 +98,26 @@ case $COMMAND in
         BACKEND_PID=$!
         cd ..
         
-        sleep 3
+        # Esperar a que el backend esté listo (máximo 30 segundos)
+        echo -n "Esperando que el backend arranque"
+        for i in {1..30}; do
+            if curl -s http://localhost:8000 > /dev/null 2>&1; then
+                echo ""
+                print_status "Backend corriendo (PID: $BACKEND_PID)"
+                break
+            fi
+            echo -n "."
+            sleep 1
+        done
         
-        # Verificar backend
-        if curl -s http://localhost:8000 > /dev/null; then
-            print_status "Backend corriendo (PID: $BACKEND_PID)"
-        else
-            print_error "Backend no responde"
+        # Verificar si arrancó
+        if ! curl -s http://localhost:8000 > /dev/null 2>&1; then
+            echo ""
+            print_error "Backend no responde después de 30 segundos"
+            echo "Revisa logs/backend.log para más detalles"
+            echo ""
+            echo "Últimas líneas del log:"
+            tail -20 logs/backend.log
             exit 1
         fi
         
@@ -116,12 +133,14 @@ case $COMMAND in
         echo "🌐 Frontend: http://localhost:3001"
         echo "📚 API Docs: http://localhost:8000/docs"
         echo "--------------------------------"
-        echo "Para detener: Ctrl+C"
+        echo "Para detener: ./paloma.sh stop"
         echo "================================"
         echo ""
         
-        # Mantener el script corriendo
-        wait
+        # Mostrar logs en tiempo real
+        echo "📋 Logs del backend (Ctrl+C para salir):"
+        echo "----------------------------------------"
+        tail -f logs/backend.log
         ;;
         
     stop)
@@ -161,15 +180,35 @@ case $COMMAND in
         else
             print_error "Frontend: DETENIDO"
         fi
+        
+        # Si algo no está corriendo, mostrar cómo iniciar
+        if ! curl -s http://localhost:8000 > /dev/null 2>&1 || ! curl -s http://localhost:3001 > /dev/null 2>&1; then
+            echo ""
+            echo "Para iniciar el sistema: ./paloma.sh start"
+        fi
+        ;;
+        
+    logs)
+        echo "📋 MOSTRANDO LOGS"
+        echo "-----------------"
+        
+        if [ -f "logs/backend.log" ]; then
+            echo "Últimas 50 líneas del backend:"
+            echo "-------------------------------"
+            tail -50 logs/backend.log
+        else
+            print_warning "No hay logs del backend"
+        fi
         ;;
         
     *)
-        echo "Uso: $0 {install|start|stop|status}"
+        echo "Uso: $0 {install|start|stop|status|logs}"
         echo ""
         echo "  install - Instala todas las dependencias"
         echo "  start   - Inicia backend y frontend"
         echo "  stop    - Detiene todos los servicios"
         echo "  status  - Muestra el estado del sistema"
+        echo "  logs    - Muestra los logs del backend"
         echo ""
         exit 1
         ;;
