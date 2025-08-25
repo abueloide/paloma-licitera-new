@@ -1,5 +1,8 @@
 -- Script de inicialización de BD
+-- Crear base de datos solo si no existe
 CREATE DATABASE paloma_licitera;
+
+-- Conectar a la base de datos
 \c paloma_licitera;
 
 -- Crear tabla licitaciones si no existe
@@ -29,8 +32,8 @@ CREATE TABLE IF NOT EXISTS licitaciones (
     fecha_captura TIMESTAMP DEFAULT NOW()
 );
 
--- Crear índices
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_fuente ON licitaciones(fuente);
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_fecha_publicacion ON licitaciones(fecha_publicacion);
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_estado ON licitaciones(estado);
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_entidad_compradora ON licitaciones(entidad_compradora);
+-- Crear índices solo si no existen (PostgreSQL maneja esto automáticamente)
+CREATE INDEX IF NOT EXISTS idx_fuente ON licitaciones(fuente);
+CREATE INDEX IF NOT EXISTS idx_fecha_publicacion ON licitaciones(fecha_publicacion);
+CREATE INDEX IF NOT EXISTS idx_estado ON licitaciones(estado);
+CREATE INDEX IF NOT EXISTS idx_entidad_compradora ON licitaciones(entidad_compradora);
