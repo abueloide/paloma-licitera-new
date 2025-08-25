@@ -1,5 +1,5 @@
 import React from 'react'
-import Dashboard from '../pages/Dashboard'
+import Dashboard from '../components/Dashboard'
 
 const Index: React.FC = () => {
   return <Dashboard />
