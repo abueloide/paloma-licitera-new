@@ -83,8 +83,33 @@ docker-compose logs -f paloma-app
 ### Scheduler Daemon
 El scheduler se ejecuta automáticamente en modo daemon cuando se inicia con Docker. Revisa:
 - Actualizaciones incrementales cada hora
-- DOF solo martes y jueves después de 9:30 AM y 9:30 PM
+- **DOF solo martes y jueves entre 9:00-10:00 AM y 21:00-22:00 PM**
 - Sitios masivos los domingos
+
+### Horarios de Ejecución por Fuente
+
+#### 📅 **DOF (Diario Oficial de la Federación)**
+- **Días**: Solo martes y jueves
+- **Horarios**: 
+  - **Matutino**: 9:00 AM - 10:00 AM 
+  - **Vespertino**: 9:00 PM - 10:00 PM
+- **Zona horaria**: America/Mexico_City
+- **Lógica**: Solo ejecuta una vez por día, respetando horarios oficiales de publicación
+
+#### 🏢 **ComprasMX**
+- **Frecuencia**: Cada 6 horas
+- **Horarios**: 00:00, 06:00, 12:00, 18:00
+- **Modo**: Incremental basado en último expediente procesado
+
+#### 🏛️ **Tianguis Digital CDMX**
+- **Frecuencia**: Cada 6 horas  
+- **Horarios**: 00:00, 06:00, 12:00, 18:00
+- **Modo**: Incremental basado en último UUID procesado
+
+#### 📊 **Sitios Masivos**
+- **Frecuencia**: Semanal
+- **Día**: Domingos a las 02:00 AM
+- **Modo**: Procesamiento completo
 
 ### Configuración Automática
 Editar `config.yaml` para cambiar:
@@ -92,6 +117,14 @@ Editar `config.yaml` para cambiar:
 - Fuentes habilitadas/deshabilitadas
 - Intervalos de actualización
 - Configuración de base de datos
+
+```yaml
+# Configuración DOF actualizada
+dof_config:
+  check_times: ["09:00", "21:00"]  # Exactamente 9 AM y 9 PM
+  retry_attempts: 3
+  retry_delay: 300  # 5 minutos
+```
 
 ## 🗃️ GESTIÓN DE DATOS
 
@@ -155,6 +188,18 @@ docker-compose exec postgres pg_isready -U postgres
 docker-compose restart postgres
 ```
 
+**DOF no ejecuta cuando debería:**
+```bash
+# Verificar día de la semana y hora
+./run-scheduler.sh status | jq '.fuentes.dof'
+
+# Ver logs específicos de DOF
+docker-compose logs scheduler | grep DOF
+
+# Forzar ejecución manual
+./run-scheduler.sh incremental --fuente=dof
+```
+
 **Scheduler no responde:**
 ```bash
 # Verificar logs
@@ -182,6 +227,10 @@ docker-compose logs -f scheduler
 
 # Solo API
 docker-compose logs -f paloma-app
+
+# Filtrar por fuente
+docker-compose logs scheduler | grep "DOF"
+docker-compose logs scheduler | grep "ComprasMX"
 ```
 
 ### Métricas importantes
@@ -189,11 +238,37 @@ docker-compose logs -f paloma-app
 # Verificar último procesamiento por fuente
 ./run-scheduler.sh status | jq '.ultimo_procesamiento'
 
-# Ver fuentes habilitadas
-./run-scheduler.sh status | jq '.fuentes'
+# Ver estado de DOF específicamente
+./run-scheduler.sh status | jq '.fuentes.dof'
 
 # Total de registros por fuente
 ./run-scheduler.sh status | jq '.database.by_source'
+
+# Verificar horarios de DOF
+./run-scheduler.sh status | jq '.scheduler_config.dof_config'
+```
+
+## 🕘 HORARIOS Y PROGRAMACIÓN
+
+### Verificar próxima ejecución DOF
+```bash
+# Ver estado de fuentes
+./run-scheduler.sh status
+
+# Logs recientes de DOF
+docker-compose logs scheduler | grep "DOF" | tail -10
+
+# Verificar día y hora actual
+date
+```
+
+### Forzar ejecución inmediata
+```bash
+# Forzar DOF (ignorar horarios)
+./run-scheduler.sh historico --fuente=dof --desde=2025-01-20
+
+# Actualización incremental de todas las fuentes
+./run-scheduler.sh incremental
 ```
 
 ## 🛑 DETENER SERVICIOS
@@ -220,6 +295,23 @@ docker-compose exec postgres psql -U postgres -d paloma_licitera
 docker-compose exec scheduler python -m src.scheduler --help
 ```
 
+### Testing de horarios DOF
+```bash
+# Simular ejecución DOF
+docker-compose exec scheduler python -c "
+from src.scheduler.scraper_wrappers import DOFWrapper
+from src.scheduler.database_queries import DatabaseQueries
+import yaml
+
+with open('config.yaml', 'r') as f:
+    config = yaml.safe_load(f)
+
+db = DatabaseQueries(config)
+wrapper = DOFWrapper(config, db)
+print(f'Should run today: {wrapper.should_run_today()}')
+"
+```
+
 ### Modo desarrollo local (sin Docker)
 ```bash
 # Instalar dependencias
@@ -241,7 +333,7 @@ python -m src.scheduler incremental
 
 1. **Monitoreo avanzado**: Implementar métricas y alertas
 2. **Web UI**: Panel de control web para el scheduler
-3. **Notificaciones**: Alertas por email/Slack
+3. **Notificaciones**: Alertas por email/Slack cuando DOF se ejecute
 4. **Backup automático**: Respaldo programado de la BD
 5. **Escalamiento**: Múltiples workers para paralelización
 
@@ -254,3 +346,9 @@ Para problemas o preguntas:
 2. Verificar estado: `./run-scheduler.sh status`
 3. Revisar configuración: `config.yaml`
 4. Documentación API: http://localhost:8000/docs
+
+### Problemas específicos de DOF:
+- Verificar que es martes o jueves
+- Confirmar que la hora está entre 9:00-10:00 AM o 21:00-22:00 PM
+- Revisar que no se haya ejecutado ya hoy
+- Revisar logs: `docker-compose logs scheduler | grep DOF`
