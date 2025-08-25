@@ -1,0 +1,17 @@
+database:
+  path: "licitaciones.db"
+
+api:
+  host: "0.0.0.0"
+  port: 8000
+
+etl:
+  sources:
+    - comprasmx
+    - dof
+  batch_size: 1000
+  delay_between_requests: 1
+
+logging:
+  level: INFO
+  file: "paloma.log"
