@@ -90,7 +90,7 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="">Todas las fuentes</SelectItem>
-              {filtros.fuentes.map((fuente) => (
+              {(filtros.fuentes || []).map((fuente) => (
                 <SelectItem key={fuente} value={fuente}>
                   {fuente}
                 </SelectItem>
@@ -107,7 +107,7 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="">Todos los tipos</SelectItem>
-              {filtros.tipos_contratacion.slice(0, 20).map((tipo) => (
+              {(filtros.tipos_contratacion || []).slice(0, 20).map((tipo) => (
                 <SelectItem key={tipo} value={tipo}>
                   {tipo}
                 </SelectItem>
@@ -124,7 +124,7 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="">Todas las entidades</SelectItem>
-              {filtros.entidades_compradoras.slice(0, 50).map((entidad) => (
+              {(filtros.entidades_compradoras || []).slice(0, 50).map((entidad) => (
                 <SelectItem key={entidad} value={entidad}>
                   {entidad.length > 30 ? `${entidad.substring(0, 30)}...` : entidad}
                 </SelectItem>
@@ -141,7 +141,7 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="">Todos los estados</SelectItem>
-              {filtros.estados.map((estado) => (
+              {(filtros.estados || []).map((estado) => (
                 <SelectItem key={estado} value={estado}>
                   {estado}
                 </SelectItem>
