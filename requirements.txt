@@ -22,3 +22,16 @@ pydantic>=2.6.0
 
 # Utilities
 chardet==5.2.0
+
+# Scheduler & Automation (NEW)
+schedule==1.2.0
+python-crontab==3.0.0
+pytz==2023.3
+
+# PDF Processing
+PyMuPDF==1.23.14
+pdfminer.six==20231228
+
+# HTML Processing
+lxml==4.9.3
+html5lib==1.1
