@@ -302,7 +302,6 @@ echo ""
 echo -e "${YELLOW}🔧 PASO 10: Configurando scripts...${NC}"
 
 chmod +x start_dashboard.sh 2>/dev/null || true
-chmod +x start_dashboard_v2.sh 2>/dev/null || true
 chmod +x stop_dashboard.sh 2>/dev/null || true
 chmod +x install.sh 2>/dev/null || true
 echo -e "${GREEN}✅ Scripts marcados como ejecutables${NC}"
@@ -325,7 +324,7 @@ echo "   • Directorios creados"
 echo ""
 echo -e "${BLUE}🚀 Para iniciar la aplicación:${NC}"
 echo ""
-echo "   ./start_dashboard_v2.sh"
+echo "   ./start_dashboard.sh"
 echo ""
 echo -e "${BLUE}⏹️  Para detener la aplicación:${NC}"
 echo ""
