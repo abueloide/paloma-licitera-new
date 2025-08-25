@@ -223,6 +223,7 @@ const Licitaciones: React.FC = () => {
                 <th>Tipo</th>
                 <th>Estado</th>
                 <th>Fecha Pub.</th>
+                <th>Fecha Apertura</th>
                 <th>Monto</th>
                 <th>Fuente</th>
                 <th>Acciones</th>
@@ -268,6 +269,11 @@ const Licitaciones: React.FC = () => {
                   <td className="text-sm">
                     {licitacion.fecha_publicacion ? 
                       formatDate(licitacion.fecha_publicacion) : 'N/A'
+                    }
+                  </td>
+                  <td className="text-sm">
+                    {licitacion.fecha_apertura ? 
+                      formatDate(licitacion.fecha_apertura) : 'N/A'
                     }
                   </td>
                   <td className="text-sm">
