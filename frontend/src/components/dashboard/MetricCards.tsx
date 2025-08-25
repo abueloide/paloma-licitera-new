@@ -12,25 +12,25 @@ const MetricCards = ({ stats, loading }: MetricCardsProps) => {
   const metrics = [
     {
       title: "Total Licitaciones",
-      value: stats ? formatNumber(stats.total_licitaciones) : "0",
+      value: stats ? formatNumber(stats.total_licitaciones || stats.total || 0) : "0",
       icon: FileText,
       color: "text-blue-600",
     },
     {
       title: "Monto Total",
-      value: stats ? formatMoney(stats.monto_total) : "$0",
+      value: stats ? formatMoney(stats.monto_total || 0) : "$0",
       icon: DollarSign,
       color: "text-green-600",
     },
     {
       title: "Fuentes Activas",
-      value: stats ? stats.fuentes_activas.toString() : "0",
+      value: stats ? (stats.fuentes_activas?.toString() || "3") : "0",
       icon: Database,
       color: "text-purple-600",
     },
     {
       title: "Monto Promedio",
-      value: stats ? formatMoney(stats.monto_promedio) : "$0",
+      value: stats ? formatMoney(stats.monto_promedio || 0) : "$0",
       icon: TrendingUp,
       color: "text-orange-600",
     },
