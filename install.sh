@@ -5,11 +5,14 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}🐦 ===================================================="
-echo "   PALOMA LICITERA - INSTALACIÓN COMPLETA"
-echo -e "====================================================${NC}"
+echo -e "${CYAN}🐦 ====================================================="
+echo "   PALOMA LICITERA - INSTALACIÓN DESDE CERO"
+echo "   Dashboard de Licitaciones v2.0 (Docker + Scheduler)"
+echo -e "=====================================================${NC}"
 echo ""
 
 # Función para verificar comandos
@@ -18,435 +21,336 @@ check_command() {
         echo -e "${RED}❌ $1 no encontrado${NC}"
         return 1
     else
-        VERSION=$($2)
-        echo -e "${GREEN}✅ $1 $VERSION encontrado${NC}"
+        VERSION=$($2 2>/dev/null || echo "")
+        echo -e "${GREEN}✅ $1 ${VERSION} encontrado${NC}"
         return 0
     fi
 }
+
+# Función para mostrar progreso
+show_progress() {
+    echo -e "${BLUE}🔄 $1...${NC}"
+}
+
+# PASO 0: Mostrar opciones de instalación
+echo -e "${YELLOW}📋 MÉTODO DE INSTALACIÓN${NC}"
+echo ""
+echo "Elige el método de instalación:"
+echo -e "  ${GREEN}1) Docker (Recomendado)${NC} - Instalación automática completa"
+echo -e "  ${YELLOW}2) Manual${NC} - Python local + PostgreSQL"
+echo ""
+echo -n "Selecciona opción (1 o 2): "
+read -r INSTALL_METHOD
+
+if [[ "$INSTALL_METHOD" == "1" ]]; then
+    DOCKER_INSTALL=true
+    echo -e "${GREEN}✅ Instalación con Docker seleccionada${NC}"
+else
+    DOCKER_INSTALL=false
+    echo -e "${YELLOW}⚡ Instalación manual seleccionada${NC}"
+fi
+
+echo ""
 
 # PASO 1: Verificar prerequisitos
 echo -e "${YELLOW}📋 PASO 1: Verificando prerequisitos...${NC}"
 echo ""
 
-# Verificar Python 3
-if ! check_command "python3" "python3 --version 2>&1 | cut -d' ' -f2"; then
-    echo -e "${RED}Por favor instala Python 3.9 o superior${NC}"
-    exit 1
-fi
-
-# Verificar Node.js
-if ! check_command "node" "node --version"; then
-    echo -e "${RED}Por favor instala Node.js 18 o superior${NC}"
-    exit 1
-fi
-
-# Verificar npm
-if ! check_command "npm" "npm --version"; then
-    echo -e "${RED}Por favor instala npm${NC}"
-    exit 1
-fi
-
-# Verificar PostgreSQL
-echo ""
-echo -e "${BLUE}🔍 Verificando PostgreSQL...${NC}"
-if command -v psql &> /dev/null; then
-    PSQL_VERSION=$(psql --version | awk '{print $3}')
-    echo -e "${GREEN}✅ PostgreSQL $PSQL_VERSION encontrado${NC}"
-else
-    echo -e "${YELLOW}⚠️  PostgreSQL no encontrado (opcional si usas remoto)${NC}"
-fi
-
-# PASO 2: Configurar entorno Python
-echo ""
-echo -e "${YELLOW}📦 PASO 2: Configurando entorno Python...${NC}"
-echo ""
-
-# Crear o recrear entorno virtual
-if [ -d "venv" ]; then
-    echo -e "${BLUE}🔄 Entorno virtual existente encontrado${NC}"
-    echo -n "   ¿Deseas recrearlo? (y/N): "
-    read -r response
-    if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
-        echo "   Eliminando entorno anterior..."
-        rm -rf venv
-        echo "   Creando nuevo entorno virtual..."
-        python3 -m venv venv
+if [ "$DOCKER_INSTALL" = true ]; then
+    # Verificar Docker y Docker Compose
+    if ! check_command "docker" "docker --version | awk '{print \$3}' | sed 's/,//g'"; then
+        echo -e "${RED}❌ Docker no encontrado${NC}"
+        echo "   Instala Docker desde: https://docs.docker.com/get-docker/"
+        exit 1
     fi
-else
-    echo -e "${BLUE}📁 Creando entorno virtual...${NC}"
-    python3 -m venv venv
-fi
 
-# Activar entorno virtual
-echo -e "${BLUE}🔌 Activando entorno virtual...${NC}"
-source venv/bin/activate
-
-# Actualizar pip
-echo -e "${BLUE}📈 Actualizando pip...${NC}"
-pip install --upgrade pip --quiet
-
-# PASO 3: Instalar dependencias Python
-echo ""
-echo -e "${YELLOW}📚 PASO 3: Instalando dependencias Python...${NC}"
-echo ""
-
-# Crear requirements.txt si no existe
-if [ ! -f "requirements.txt" ]; then
-    echo -e "${BLUE}📝 Creando requirements.txt...${NC}"
-    cat > requirements.txt << 'REQ'
-# Core
-python-dotenv==1.0.0
-pyyaml==6.0.1
-
-# Database
-psycopg2-binary>=2.9.10
-sqlalchemy>=2.0.25
-
-# Web scraping
-playwright>=1.45.0
-beautifulsoup4==4.12.2
-requests==2.31.0
-
-# Data processing
-pandas>=2.2.0
-python-dateutil==2.8.2
-
-# API
-fastapi>=0.110.0
-uvicorn>=0.27.0
-pydantic>=2.6.0
-
-# Utils
-chardet==5.2.0
-REQ
-fi
-
-echo -e "${BLUE}📦 Instalando paquetes...${NC}"
-pip install -r requirements.txt
-
-# Verificar instalación
-echo ""
-echo -e "${GREEN}✔️  Verificando paquetes críticos...${NC}"
-for package in uvicorn fastapi psycopg2 pandas playwright; do
-    if pip show $package &> /dev/null; then
-        echo -e "   ${GREEN}✅ $package instalado${NC}"
-    else
-        echo -e "   ${RED}❌ $package NO instalado${NC}"
-    fi
-done
-
-# Instalar navegadores para Playwright
-echo ""
-echo -e "${BLUE}🌐 Instalando navegadores para Playwright...${NC}"
-playwright install chromium --quiet
-
-# PASO 4: Instalar dependencias Frontend
-echo ""
-echo -e "${YELLOW}🎨 PASO 4: Instalando dependencias Frontend...${NC}"
-echo ""
-
-cd frontend
-echo -e "${BLUE}🧹 Limpiando caché de npm...${NC}"
-npm cache clean --force
-
-echo -e "${BLUE}📦 Instalando paquetes npm...${NC}"
-npm install
-
-cd ..
-
-# PASO 5: Verificar configuración
-echo ""
-echo -e "${YELLOW}⚙️  PASO 5: Verificando configuración...${NC}"
-echo ""
-
-if [ -f "config.yaml" ]; then
-    echo -e "${GREEN}✅ config.yaml encontrado${NC}"
-else
-    echo -e "${YELLOW}📝 Creando config.yaml de ejemplo...${NC}"
-    cat > config.yaml << 'CONFIG'
-database:
-  host: localhost
-  port: 5432
-  name: paloma_licitera
-  user: postgres
-  password: postgres
-
-api:
-  host: 0.0.0.0
-  port: 8000
-  reload: true
-
-scrapers:
-  tianguis:
-    enabled: true
-    base_url: "https://tianguisdigital.finanzas.cdmx.gob.mx"
-  comprasmx:
-    enabled: true
-    base_url: "https://comprasmx.hacienda.gob.mx"
-CONFIG
-    echo -e "${GREEN}✅ config.yaml creado${NC}"
-fi
-
-# PASO 6: Verificar base de datos
-echo ""
-echo -e "${YELLOW}🗄️  PASO 6: Verificando base de datos...${NC}"
-echo ""
-
-if command -v psql &> /dev/null; then
-    # Intentar conectar a PostgreSQL
-    if psql -h localhost -U postgres -d paloma_licitera -c "SELECT COUNT(*) FROM licitaciones;" &> /dev/null; then
-        COUNT=$(psql -h localhost -U postgres -d paloma_licitera -t -c "SELECT COUNT(*) FROM licitaciones;" 2>/dev/null | xargs)
-        echo -e "${GREEN}✅ Conexión a PostgreSQL exitosa${NC}"
-        echo -e "${BLUE}📊 Base de datos contiene $COUNT licitaciones${NC}"
-    else
-        echo -e "${YELLOW}⚠️  No se pudo conectar a la base de datos${NC}"
-        echo "   Verifica que PostgreSQL esté ejecutándose y las credenciales en config.yaml"
-    fi
-else
-    echo -e "${YELLOW}⚠️  psql no encontrado, no se puede verificar la base de datos${NC}"
-fi
-
-# PASO 7: Actualizar scripts de inicio
-echo ""
-echo -e "${YELLOW}🚀 PASO 7: Creando scripts optimizados...${NC}"
-echo ""
-
-# Crear start_dashboard.sh mejorado
-cat > start_dashboard.sh << 'STARTSCRIPT'
-#!/bin/bash
-
-echo "🐦 Iniciando Paloma Licitera Dashboard..."
-
-# Activar entorno virtual si existe
-if [ -d "venv" ]; then
-    echo "🔌 Activando entorno virtual..."
-    source venv/bin/activate
-else
-    echo "⚠️  No se encontró entorno virtual. Ejecuta ./install.sh primero"
-    exit 1
-fi
-
-# Verificar PostgreSQL
-if command -v psql &> /dev/null; then
-    COUNT=$(psql -h localhost -U postgres -d paloma_licitera -t -c "SELECT COUNT(*) FROM licitaciones;" 2>/dev/null | xargs)
-    if [ ! -z "$COUNT" ]; then
-        echo "📊 Base de datos contiene $COUNT licitaciones"
-    fi
-fi
-
-# Crear directorio de logs
-mkdir -p logs
-
-echo ""
-echo "🚀 Iniciando servicios..."
-
-# Matar procesos anteriores si existen
-if [ -f .backend.pid ]; then
-    OLD_PID=$(cat .backend.pid)
-    if ps -p $OLD_PID > /dev/null 2>&1; then
-        echo "   ⏹️  Deteniendo backend anterior..."
-        kill $OLD_PID 2>/dev/null
-    fi
-fi
-
-if [ -f .frontend.pid ]; then
-    OLD_PID=$(cat .frontend.pid)
-    if ps -p $OLD_PID > /dev/null 2>&1; then
-        echo "   ⏹️  Deteniendo frontend anterior..."
-        kill $OLD_PID 2>/dev/null
-    fi
-fi
-
-# Iniciar backend
-echo "   📡 Iniciando backend API (puerto 8000)..."
-python src/api.py > logs/backend.log 2>&1 &
-BACKEND_PID=$!
-
-# Verificar que el backend se inició
-sleep 2
-if ps -p $BACKEND_PID > /dev/null; then
-    echo "   ✅ Backend iniciado (PID: $BACKEND_PID)"
-    echo $BACKEND_PID > .backend.pid
-else
-    echo "   ❌ Error al iniciar el backend"
-    echo "   Ver logs en: logs/backend.log"
-    tail -n 20 logs/backend.log
-    exit 1
-fi
-
-# Esperar a que el backend esté listo
-echo "   ⏳ Esperando a que el backend esté listo..."
-for i in {1..10}; do
-    if curl -s http://localhost:8000/ > /dev/null 2>&1; then
-        echo "   ✅ Backend respondiendo correctamente"
-        break
-    fi
-    sleep 1
-done
-
-# Iniciar frontend
-echo "   🎨 Iniciando frontend (puerto 5173)..."
-cd frontend && npm run dev > ../logs/frontend.log 2>&1 &
-FRONTEND_PID=$!
-cd ..
-
-# Verificar que el frontend se inició
-sleep 2
-if ps -p $FRONTEND_PID > /dev/null; then
-    echo "   ✅ Frontend iniciado (PID: $FRONTEND_PID)"
-    echo $FRONTEND_PID > .frontend.pid
-else
-    echo "   ❌ Error al iniciar el frontend"
-    echo "   Ver logs en: logs/frontend.log"
-    exit 1
-fi
-
-echo ""
-echo "======================================"
-echo "✅ Dashboard iniciado correctamente"
-echo "======================================"
-echo ""
-echo "🌐 Abrir en el navegador:"
-echo "   http://localhost:5173"
-echo ""
-echo "📊 API disponible en:"
-echo "   http://localhost:8000"
-echo "   http://localhost:8000/docs (Swagger UI)"
-echo ""
-echo "📝 Logs disponibles en:"
-echo "   - Backend: logs/backend.log"
-echo "   - Frontend: logs/frontend.log"
-echo ""
-echo "⏹️  Para detener: ./stop_dashboard.sh"
-echo ""
-
-# Abrir navegador automáticamente
-sleep 2
-if command -v open &> /dev/null; then
-    open http://localhost:5173
-elif command -v xdg-open &> /dev/null; then
-    xdg-open http://localhost:5173
-fi
-
-# Mantener el script corriendo y mostrar logs
-echo "📋 Presiona Ctrl+C para detener todos los servicios"
-echo ""
-
-# Trap para limpiar al salir
-trap 'echo ""; echo "⏹️  Deteniendo servicios..."; ./stop_dashboard.sh; exit' INT TERM
-
-# Mantener el script vivo
-wait
-STARTSCRIPT
-
-# Crear stop_dashboard.sh mejorado
-cat > stop_dashboard.sh << 'STOPSCRIPT'
-#!/bin/bash
-
-echo "⏹️  Deteniendo Paloma Licitera Dashboard..."
-
-# Detener backend
-if [ -f .backend.pid ]; then
-    BACKEND_PID=$(cat .backend.pid)
-    if ps -p $BACKEND_PID > /dev/null 2>&1; then
-        echo "   Deteniendo backend (PID: $BACKEND_PID)..."
-        kill $BACKEND_PID 2>/dev/null
-        sleep 1
-        # Forzar si no se detuvo
-        if ps -p $BACKEND_PID > /dev/null 2>&1; then
-            kill -9 $BACKEND_PID 2>/dev/null
+    if ! check_command "docker-compose" "docker-compose --version | awk '{print \$3}' | sed 's/,//g'"; then
+        # Intentar docker compose (versión nueva)
+        if ! docker compose version &> /dev/null; then
+            echo -e "${RED}❌ Docker Compose no encontrado${NC}"
+            echo "   Instala Docker Compose desde: https://docs.docker.com/compose/install/"
+            exit 1
+        else
+            echo -e "${GREEN}✅ docker compose encontrado${NC}"
         fi
-        echo "   ✅ Backend detenido"
-    else
-        echo "   ℹ️  Backend no estaba ejecutándose"
     fi
-    rm -f .backend.pid
+
+    # Verificar que Docker esté corriendo
+    if ! docker ps &> /dev/null; then
+        echo -e "${RED}❌ Docker no está ejecutándose${NC}"
+        echo "   Inicia Docker y vuelve a ejecutar este script"
+        exit 1
+    fi
+    echo -e "${GREEN}✅ Docker está ejecutándose correctamente${NC}"
+
 else
-    echo "   ℹ️  No se encontró PID del backend"
+    # Verificar Python 3
+    if ! check_command "python3" "python3 --version 2>&1 | cut -d' ' -f2"; then
+        echo -e "${RED}❌ Python 3.8+ requerido${NC}"
+        exit 1
+    fi
+
+    # Verificar Node.js
+    if ! check_command "node" "node --version"; then
+        echo -e "${RED}❌ Node.js 16+ requerido${NC}"
+        exit 1
+    fi
+
+    # Verificar npm
+    if ! check_command "npm" "npm --version"; then
+        echo -e "${RED}❌ npm requerido${NC}"
+        exit 1
+    fi
+
+    # Verificar PostgreSQL
+    if ! check_command "psql" "psql --version | awk '{print \$3}'"; then
+        echo -e "${YELLOW}⚠️  PostgreSQL no encontrado - necesitarás configurarlo${NC}"
+    fi
 fi
 
-# Detener frontend
-if [ -f .frontend.pid ]; then
-    FRONTEND_PID=$(cat .frontend.pid)
-    if ps -p $FRONTEND_PID > /dev/null 2>&1; then
-        echo "   Deteniendo frontend (PID: $FRONTEND_PID)..."
-        kill $FRONTEND_PID 2>/dev/null
-        sleep 1
-        # Forzar si no se detuvo
-        if ps -p $FRONTEND_PID > /dev/null 2>&1; then
-            kill -9 $FRONTEND_PID 2>/dev/null
-        fi
-        echo "   ✅ Frontend detenido"
-    else
-        echo "   ℹ️  Frontend no estaba ejecutándose"
-    fi
-    rm -f .frontend.pid
-else
-    echo "   ℹ️  No se encontró PID del frontend"
+# Verificar Git
+if ! check_command "git" "git --version | awk '{print \$3}'"; then
+    echo -e "${RED}❌ Git requerido${NC}"
+    exit 1
 fi
 
-# Limpiar cualquier proceso huérfano
-echo "   🧹 Limpiando procesos huérfanos..."
-pkill -f "npm run dev" 2>/dev/null
-pkill -f "vite" 2>/dev/null
-pkill -f "python src/api.py" 2>/dev/null
-pkill -f "uvicorn" 2>/dev/null
-
+# PASO 2: Crear directorios necesarios
 echo ""
-echo "✅ Dashboard detenido completamente"
-STOPSCRIPT
-
-# Hacer ejecutables los scripts
-chmod +x start_dashboard.sh
-chmod +x stop_dashboard.sh
-
-echo -e "${GREEN}✅ Scripts creados y marcados como ejecutables${NC}"
-
-# PASO 8: Crear directorios necesarios
-echo ""
-echo -e "${YELLOW}📁 PASO 8: Creando directorios necesarios...${NC}"
+echo -e "${YELLOW}📁 PASO 2: Creando estructura de directorios...${NC}"
 echo ""
 
-mkdir -p logs
-mkdir -p data
-mkdir -p exports
+show_progress "Creando directorios"
+mkdir -p data/raw data/processed logs
+
+if [ "$DOCKER_INSTALL" = false ]; then
+    mkdir -p exports
+fi
 
 echo -e "${GREEN}✅ Directorios creados${NC}"
+echo "   • data/raw - Datos crudos de scrapers"
+echo "   • data/processed - Datos procesados"  
+echo "   • logs - Logs del sistema"
 
-# Resumen final
+# PASO 3: Configurar permisos de scripts
 echo ""
-echo -e "${GREEN}===================================================="
-echo "✅ INSTALACIÓN COMPLETADA CON ÉXITO"
-echo "====================================================${NC}"
+echo -e "${YELLOW}🔧 PASO 3: Configurando permisos de scripts...${NC}"
 echo ""
-echo -e "${BLUE}📋 Resumen de la instalación:${NC}"
-echo "   • Python con entorno virtual en: venv/"
-echo "   • Dependencias Python instaladas"
-echo "   • Dependencias Frontend instaladas"
-echo "   • Scripts de inicio actualizados"
-echo "   • Configuración verificada"
-echo ""
-echo -e "${YELLOW}🚀 Para iniciar la aplicación:${NC}"
-echo ""
-echo "   ${GREEN}./start_dashboard.sh${NC}"
-echo ""
-echo -e "${YELLOW}⏹️  Para detener la aplicación:${NC}"
-echo ""
-echo "   ${GREEN}./stop_dashboard.sh${NC}"
-echo ""
-echo -e "${BLUE}📝 NOTAS IMPORTANTES:${NC}"
-echo "   • El script activa automáticamente el entorno virtual"
-echo "   • Los logs se guardan en logs/"
-echo "   • Asegúrate de que PostgreSQL esté ejecutándose"
-echo "   • Verifica las credenciales en config.yaml"
-echo ""
-echo -e "${GREEN}¡Listo para usar! 🎉${NC}"
 
-# Preguntar si quiere iniciar ahora
-echo ""
-echo -n "¿Deseas iniciar el dashboard ahora? (y/N): "
-read -r response
-if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+show_progress "Asignando permisos"
+chmod +x docker-start.sh docker-stop.sh run-scheduler.sh 2>/dev/null || true
+
+if [ "$DOCKER_INSTALL" = false ]; then
+    chmod +x start_dashboard.sh stop_dashboard.sh 2>/dev/null || true
+fi
+
+echo -e "${GREEN}✅ Permisos configurados${NC}"
+
+if [ "$DOCKER_INSTALL" = true ]; then
+    # INSTALACIÓN DOCKER
     echo ""
-    ./start_dashboard.sh
+    echo -e "${CYAN}🐳 INSTALACIÓN DOCKER${NC}"
+    echo ""
+
+    # PASO 4: Construir contenedores
+    echo -e "${YELLOW}🔨 PASO 4: Construyendo contenedores Docker...${NC}"
+    echo ""
+    
+    show_progress "Construyendo imágenes Docker (esto puede tomar varios minutos)"
+    if docker-compose build --no-cache; then
+        echo -e "${GREEN}✅ Contenedores construidos exitosamente${NC}"
+    else
+        echo -e "${RED}❌ Error construyendo contenedores${NC}"
+        exit 1
+    fi
+
+    # PASO 5: Iniciar servicios
+    echo ""
+    echo -e "${YELLOW}🚀 PASO 5: Iniciando servicios...${NC}"
+    echo ""
+
+    show_progress "Iniciando PostgreSQL"
+    docker-compose up -d postgres
+
+    show_progress "Esperando PostgreSQL (30 segundos)"
+    sleep 30
+
+    show_progress "Verificando PostgreSQL"
+    if docker-compose exec -T postgres pg_isready -U postgres; then
+        echo -e "${GREEN}✅ PostgreSQL iniciado correctamente${NC}"
+    else
+        echo -e "${RED}❌ Error iniciando PostgreSQL${NC}"
+        echo "Ver logs: docker-compose logs postgres"
+        exit 1
+    fi
+
+    show_progress "Iniciando aplicación y scheduler"
+    docker-compose up -d paloma-app scheduler
+
+    # PASO 6: Verificar servicios
+    echo ""
+    echo -e "${YELLOW}✅ PASO 6: Verificando servicios...${NC}"
+    echo ""
+
+    sleep 10
+
+    # Verificar que los contenedores estén corriendo
+    if docker-compose ps | grep -q "running"; then
+        echo -e "${GREEN}✅ Servicios Docker iniciados${NC}"
+        docker-compose ps
+    else
+        echo -e "${RED}❌ Error en servicios Docker${NC}"
+        docker-compose logs
+        exit 1
+    fi
+
+    # Verificar API
+    show_progress "Verificando API"
+    for i in {1..10}; do
+        if curl -s http://localhost:8000/ > /dev/null 2>&1; then
+            echo -e "${GREEN}✅ API respondiendo en http://localhost:8000${NC}"
+            break
+        fi
+        sleep 3
+        if [ $i -eq 10 ]; then
+            echo -e "${YELLOW}⚠️  API no responde aún, pero puede estar iniciando${NC}"
+        fi
+    done
+
+    # PASO 7: Primera carga de datos (opcional)
+    echo ""
+    echo -e "${YELLOW}📊 PASO 7: Carga inicial de datos${NC}"
+    echo ""
+    
+    echo -n "¿Deseas ejecutar una carga inicial de datos? (y/N): "
+    read -r response
+    if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+        echo -e "${BLUE}🔄 Ejecutando carga incremental...${NC}"
+        ./run-scheduler.sh incremental
+        echo -e "${GREEN}✅ Carga inicial completada${NC}"
+    else
+        echo -e "${YELLOW}ℹ️  Puedes ejecutar datos después con: ./run-scheduler.sh incremental${NC}"
+    fi
+
+else
+    # INSTALACIÓN MANUAL
+    echo ""
+    echo -e "${PURPLE}⚡ INSTALACIÓN MANUAL${NC}"
+    echo ""
+
+    # PASO 4: Configurar entorno Python
+    echo -e "${YELLOW}📦 PASO 4: Configurando entorno Python...${NC}"
+    echo ""
+
+    show_progress "Creando entorno virtual"
+    python3 -m venv venv
+    
+    show_progress "Activando entorno virtual"
+    source venv/bin/activate
+
+    show_progress "Actualizando pip"
+    pip install --upgrade pip --quiet
+
+    show_progress "Instalando dependencias Python"
+    pip install -r requirements.txt
+
+    echo -e "${GREEN}✅ Entorno Python configurado${NC}"
+
+    # PASO 5: Instalar dependencias Frontend
+    echo ""
+    echo -e "${YELLOW}🎨 PASO 5: Configurando Frontend...${NC}"
+    echo ""
+
+    cd frontend
+    show_progress "Limpiando caché npm"
+    npm cache clean --force
+
+    show_progress "Instalando dependencias npm"
+    npm install
+
+    cd ..
+    echo -e "${GREEN}✅ Frontend configurado${NC}"
+
+    # PASO 6: Configurar base de datos
+    echo ""
+    echo -e "${YELLOW}🗄️  PASO 6: Configuración de base de datos...${NC}"
+    echo ""
+
+    if command -v psql &> /dev/null; then
+        echo -e "${GREEN}ℹ️  PostgreSQL encontrado${NC}"
+        echo "   Asegúrate de que PostgreSQL esté ejecutándose"
+        echo "   Configura las credenciales en config.yaml"
+    else
+        echo -e "${YELLOW}⚠️  PostgreSQL no encontrado${NC}"
+        echo "   Instala PostgreSQL o configura una instancia remota"
+    fi
+fi
+
+# RESUMEN FINAL
+echo ""
+echo -e "${GREEN}====================================================="
+echo "✅ INSTALACIÓN COMPLETADA CON ÉXITO"
+echo -e "=====================================================${NC}"
+echo ""
+
+if [ "$DOCKER_INSTALL" = true ]; then
+    echo -e "${CYAN}🐳 INSTALACIÓN DOCKER COMPLETADA${NC}"
+    echo ""
+    echo -e "${BLUE}📋 Servicios iniciados:${NC}"
+    echo "   • PostgreSQL: localhost:5432"
+    echo "   • API REST: http://localhost:8000"
+    echo "   • Scheduler: Modo daemon activo"
+    echo ""
+    echo -e "${YELLOW}🚀 COMANDOS DISPONIBLES:${NC}"
+    echo ""
+    echo -e "   ${GREEN}./run-scheduler.sh status${NC}          # Ver estado del sistema"
+    echo -e "   ${GREEN}./run-scheduler.sh incremental${NC}     # Actualización incremental"
+    echo -e "   ${GREEN}./run-scheduler.sh historico --fuente=all --desde=2025-01-01${NC}  # Descarga histórica"
+    echo -e "   ${GREEN}docker-compose logs -f scheduler${NC}   # Ver logs del scheduler"
+    echo -e "   ${GREEN}./docker-stop.sh${NC}                  # Detener servicios"
+    echo ""
+    echo -e "${PURPLE}📊 ACCESOS:${NC}"
+    echo "   • Dashboard: http://localhost:8000"
+    echo "   • API Docs: http://localhost:8000/docs"
+    echo ""
+    echo -e "${CYAN}🔄 AUTOMATIZACIÓN:${NC}"
+    echo "   • ComprasMX y Tianguis: cada 6 horas"
+    echo "   • DOF: martes y jueves 9:00-10:00 AM y 21:00-22:00 PM"
+    echo "   • Sitios masivos: domingos 2:00 AM"
+
+else
+    echo -e "${PURPLE}⚡ INSTALACIÓN MANUAL COMPLETADA${NC}"
+    echo ""
+    echo -e "${YELLOW}🚀 Para iniciar la aplicación:${NC}"
+    echo ""
+    echo -e "   ${GREEN}./start_dashboard.sh${NC}"
+    echo ""
+    echo -e "${YELLOW}⏹️  Para detener la aplicación:${NC}"
+    echo ""
+    echo -e "   ${GREEN}./stop_dashboard.sh${NC}"
+    echo ""
+    echo -e "${BLUE}📝 NOTAS:${NC}"
+    echo "   • Configura PostgreSQL en config.yaml"
+    echo "   • Los logs se guardan en logs/"
+    echo "   • El frontend estará en http://localhost:3001"
+    echo "   • La API estará en http://localhost:8000"
+fi
+
+echo ""
+echo -e "${GREEN}🎉 ¡Paloma Licitera está lista para usar!${NC}"
+echo ""
+
+# Preguntar si abrir en navegador
+if [ "$DOCKER_INSTALL" = true ]; then
+    echo -n "¿Deseas abrir el dashboard en el navegador? (y/N): "
+    read -r response
+    if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+        sleep 2
+        if command -v open &> /dev/null; then
+            open http://localhost:8000
+        elif command -v xdg-open &> /dev/null; then
+            xdg-open http://localhost:8000
+        else
+            echo "Abre manualmente: http://localhost:8000"
+        fi
+    fi
 fi
