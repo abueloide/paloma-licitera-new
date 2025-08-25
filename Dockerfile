@@ -1,22 +1,31 @@
 FROM python:3.11-slim
 
-# Instalar dependencias del sistema para PostgreSQL y Playwright
+# Instalar dependencias del sistema necesarias
 RUN apt-get update && apt-get install -y \
     postgresql-client \
     wget \
     gnupg \
+    curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-
-# Instalar Playwright browsers
-RUN pip install playwright
-RUN playwright install chromium
-RUN playwright install-deps
 
 WORKDIR /app
 
-# Copiar requirements y instalar dependencias Python
+# Copiar requirements primero para aprovechar cache de Docker
 COPY requirements.txt .
+
+# Instalar dependencias Python (sin playwright primero)
+RUN pip install --no-cache-dir --upgrade pip
+
+# Instalar dependencias básicas primero
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Instalar Playwright después de tener todo configurado
+RUN pip install playwright==1.45.0
+
+# Instalar browsers de Playwright (solo chromium para reducir tamaño)
+RUN playwright install-deps chromium
+RUN playwright install chromium
 
 # Copiar código fuente
 COPY . .
