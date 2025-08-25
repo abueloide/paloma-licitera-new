@@ -1,15 +1,34 @@
 # 🐦 Paloma Licitera - Dashboard de Licitaciones
 
-Sistema de monitoreo y análisis de licitaciones gubernamentales de México.
+Sistema de monitoreo y análisis de licitaciones gubernamentales de México con **automatización ETL y Docker**.
 
 ## 🚀 Inicio Rápido
 
-### Prerrequisitos
+### Opción 1: Docker (Recomendado)
+```bash
+# Clonar repositorio
+git clone https://github.com/abueloide/paloma-licitera-new.git
+cd paloma-licitera-new
+
+# Dar permisos y ejecutar
+chmod +x docker-start.sh docker-stop.sh run-scheduler.sh
+./docker-start.sh
+```
+
+**¡Listo!** Servicios disponibles:
+- **Dashboard**: http://localhost:8000
+- **API**: http://localhost:8000/docs
+- **PostgreSQL**: localhost:5432
+- **Scheduler**: Automático en segundo plano
+
+### Opción 2: Instalación Manual
+
+#### Prerrequisitos
 - Python 3.8+
 - Node.js 16+
 - PostgreSQL 12+
 
-### Instalación y Ejecución
+#### Instalación y Ejecución
 
 1. **Instalar dependencias del backend:**
 ```bash
@@ -40,26 +59,53 @@ Esto iniciará:
 - Backend FastAPI en http://localhost:8000
 - Frontend React en http://localhost:3001
 
-## 🛠️ Desarrollo
+## 🤖 Sistema de Automatización ETL
 
-### Backend (FastAPI)
+### ✨ **¡NOVEDAD!** Scheduler Automático
+
+El sistema incluye un **scheduler inteligente** que automatiza la extracción de datos:
+
+#### Funcionalidades del Scheduler:
+- **🔄 Actualizaciones Incrementales**: Cada 6 horas para ComprasMX y Tianguis
+- **📅 DOF Inteligente**: Solo martes y jueves después de horarios de publicación
+- **📊 Sitios Masivos**: Procesamiento semanal los domingos
+- **🐳 Dockerizado**: Fácil despliegue y escalamiento
+- **📈 Monitoreo**: Estado en tiempo real y métricas detalladas
+
+### Comandos del Scheduler
+
 ```bash
-# Ejecutar solo el backend
-cd src
-uvicorn api:app --reload --port 8000
+# Estado del sistema
+./run-scheduler.sh status
+
+# Actualizaciones incrementales
+./run-scheduler.sh incremental
+
+# Descarga histórica desde fecha específica
+./run-scheduler.sh historico --fuente=all --desde=2025-01-01
+
+# Ejecuciones batch programadas
+./run-scheduler.sh batch diario
+./run-scheduler.sh batch cada_6h
+./run-scheduler.sh batch semanal
 ```
 
-### Frontend (React + Vite)
-```bash
-# Ejecutar solo el frontend
-cd frontend
-npm run dev
-```
+### Docker Commands
 
-### ETL (Extracción de datos)
 ```bash
-# Ejecutar proceso ETL para extraer licitaciones
-python -m src.etl
+# Iniciar servicios
+./docker-start.sh
+
+# Ver logs en tiempo real
+docker-compose logs -f scheduler
+docker-compose logs -f paloma-app
+
+# Detener servicios
+./docker-stop.sh
+
+# Acceso directo a contenedores
+docker-compose exec scheduler bash
+docker-compose exec postgres psql -U postgres -d paloma_licitera
 ```
 
 ## 📊 Características Principales
@@ -70,14 +116,17 @@ python -m src.etl
 - **Lista de Licitaciones**: Búsqueda, filtrado y paginación
 - **Detalle de Licitación**: Vista completa de cada licitación
 - **Análisis Avanzado**: Gráficos y análisis por diferentes dimensiones
-- **ETL Automático**: Extracción desde múltiples fuentes gubernamentales
+- **🆕 ETL Automático**: Extracción automatizada desde múltiples fuentes
+- **🆕 Scheduler Inteligente**: Actualizaciones programadas y en tiempo real
+- **🆕 Monitoreo Avanzado**: Estado del sistema y métricas detalladas
 - **API REST**: Endpoints completos para todas las funcionalidades
 
 ### 🎯 Fuentes de Datos Soportadas
 
-- **ComprasMX** (comprasgob.gob.mx)
-- **DOF** (Diario Oficial de la Federación)
-- **Sistemas Estatales** (En desarrollo)
+- **ComprasMX** (comprasgob.gob.mx) - Actualizaciones cada 6h
+- **DOF** (Diario Oficial de la Federación) - Martes y jueves
+- **Tianguis Digital CDMX** - Actualizaciones cada 6h
+- **Sistemas Estatales** - Procesamiento semanal
 
 ### 📱 Interfaz de Usuario
 
@@ -86,52 +135,63 @@ python -m src.etl
 - **Visualizaciones**: Charts interactivos con datos en tiempo real
 - **Paginación**: Manejo eficiente de grandes volúmenes de datos
 
-## 🔧 Problemas Resueltos Recientemente
+## 🏗️ Arquitectura del Sistema
 
-### ✅ Frontend no hacía queries al backend
-**Problema:** El frontend no se podía conectar al backend debido a la falta de configuración del proxy.
-
-**Solución:** Se añadió configuración de proxy en `vite.config.ts`:
-```typescript
-server: {
-  proxy: {
-    '/api': {
-      target: 'http://localhost:8000',
-      changeOrigin: true,
-      rewrite: (path) => path.replace(/^\/api/, '')
-    }
-  }
-}
-```
-
-### ✅ Fechas incorrectas en la tabla de licitaciones
-**Problema:** Solo se mostraba fecha de publicación, faltaba fecha de apertura.
-
-**Solución:** Se añadió columna "Fecha Apertura" en la tabla de licitaciones mostrando tanto `fecha_publicacion` como `fecha_apertura`.
-
-### ✅ Manejo de errores mejorado
-**Problema:** Errores de conexión no eran claros para el usuario.
-
-**Solución:** Se implementó mejor manejo de errores en el servicio API con mensajes más descriptivos.
-
-## 🏗️ Estructura del Proyecto
+### Componentes Principales
 
 ```
 paloma-licitera-new/
-├── frontend/                 # React + TypeScript + Vite
+├── 🐳 Docker & Automation
+│   ├── Dockerfile              # Contenedor principal
+│   ├── docker-compose.yml      # Orquestación de servicios
+│   ├── init.sql               # Inicialización de BD
+│   └── run-scheduler.sh       # Comandos del scheduler
+│
+├── 🤖 Scheduler System
+│   └── src/scheduler/
+│       ├── scheduler_manager.py    # Manager principal
+│       ├── scraper_wrappers.py    # Wrappers de extractores
+│       ├── database_queries.py    # Queries especializadas
+│       └── __main__.py           # CLI commands
+│
+├── 🌐 Frontend (React + TypeScript)
 │   ├── src/
 │   │   ├── components/       # Componentes reutilizables
 │   │   ├── pages/           # Páginas principales
 │   │   ├── services/        # API services
 │   │   └── types/           # TypeScript types
 │   └── package.json
-├── src/                     # Backend Python
-│   ├── api.py              # FastAPI application
-│   ├── database.py         # Database models & operations
-│   ├── etl.py              # ETL processes
-│   └── extractors/         # Data extractors
-├── etl-process/            # ETL configuration
-└── start_project.sh        # Quick start script
+│
+├── 🔧 Backend (FastAPI)
+│   ├── src/
+│   │   ├── api.py              # FastAPI application
+│   │   ├── database.py         # Database models & operations
+│   │   ├── etl.py              # ETL processes
+│   │   └── extractors/         # Data extractors
+│
+└── 📊 ETL Process
+    └── etl-process/
+        └── extractors/         # Scrapers por fuente
+            ├── comprasMX/
+            ├── dof/
+            ├── tianguis-digital/
+            └── sitios-masivos/
+```
+
+### 🔄 Flujo de Automatización
+
+```mermaid
+graph TD
+    A[Scheduler Daemon] --> B{Verificar Horario}
+    B -->|6h| C[ComprasMX + Tianguis]
+    B -->|Mar/Jue 9:30+| D[DOF]
+    B -->|Domingo 2 AM| E[Sitios Masivos]
+    C --> F[Ejecutar Scraper]
+    D --> F
+    E --> F
+    F --> G[Procesar Datos ETL]
+    G --> H[Insertar en PostgreSQL]
+    H --> I[Actualizar Dashboard]
 ```
 
 ## 📋 API Endpoints
@@ -149,40 +209,108 @@ paloma-licitera-new/
 - `GET /analisis/por-fuente` - Análisis por fuente
 - `GET /analisis/temporal` - Análisis temporal
 
-## 🚨 Solución de Problemas Comunes
+## 🔧 Configuración Avanzada
 
-### El frontend muestra "Error de conexión"
-1. Verificar que el backend esté ejecutándose en http://localhost:8000
-2. Verificar que no hay conflictos de puertos
-3. Revisar los logs de la consola del navegador
-
-### No aparecen datos en el dashboard
-1. Ejecutar el proceso ETL para extraer datos:
-```bash
-python -m src.etl
-```
-2. Verificar que la base de datos tenga datos:
-```bash
-psql -h localhost -U postgres -d paloma_licitera -c "SELECT COUNT(*) FROM licitaciones;"
+### Variables de Entorno Docker
+```yaml
+# docker-compose.yml
+environment:
+  - DATABASE_HOST=postgres
+  - DATABASE_PORT=5432
+  - DATABASE_NAME=paloma_licitera
+  - DATABASE_USER=postgres
+  - DATABASE_PASSWORD=postgres123
 ```
 
-### Errores al instalar dependencias
-```bash
-# Limpiar cache de npm
-cd frontend && npm cache clean --force && npm install
+### Configuración del Scheduler
+```yaml
+# config.yaml
+automation:
+  batch_config:
+    diario: 
+      hora: "06:00"
+      fuentes: ["comprasmx", "dof", "tianguis"]
+    cada_6h:
+      horas: ["06:00", "12:00", "18:00", "00:00"]
+      fuentes: ["comprasmx", "tianguis"]
+    semanal:
+      dia: "domingo"
+      hora: "02:00"
+      fuentes: ["sitios-masivos"]
+```
 
-# Reinstalar dependencias de Python
-pip install --upgrade -r requirements.txt
+## 🛠️ Desarrollo
+
+### Backend (FastAPI)
+```bash
+# Ejecutar solo el backend
+cd src
+uvicorn api:app --reload --port 8000
+```
+
+### Frontend (React + Vite)
+```bash
+# Ejecutar solo el frontend
+cd frontend
+npm run dev
+```
+
+### Scheduler (Desarrollo)
+```bash
+# Ejecutar scheduler localmente
+python -m src.scheduler --help
+python -m src.scheduler status
+python -m src.scheduler incremental
+```
+
+## 🚨 Solución de Problemas
+
+### Docker Issues
+```bash
+# Ver logs detallados
+docker-compose logs scheduler
+docker-compose logs paloma-app
+
+# Reiniciar servicios
+./docker-stop.sh && ./docker-start.sh
+
+# Reconstruir contenedores
+docker-compose down && docker-compose build && docker-compose up -d
+```
+
+### Database Issues
+```bash
+# Verificar PostgreSQL
+docker-compose exec postgres pg_isready -U postgres
+
+# Ver estadísticas
+docker-compose exec postgres psql -U postgres -d paloma_licitera -c "
+SELECT fuente, COUNT(*) as total, MAX(fecha_captura) as ultima_actualizacion
+FROM licitaciones GROUP BY fuente ORDER BY total DESC;"
+```
+
+### Scheduler Issues
+```bash
+# Estado detallado
+./run-scheduler.sh status
+
+# Logs del scheduler
+docker-compose logs -f scheduler
+
+# Ejecutar manualmente
+./run-scheduler.sh incremental --fuente=comprasmx
 ```
 
 ## 📚 Tecnologías Utilizadas
 
-### Backend
+### Backend & Automation
 - **FastAPI** - Framework web moderno para Python
 - **PostgreSQL** - Base de datos robusta y escalable
+- **Docker** - Containerización y orquestación
 - **Pandas** - Manipulación y análisis de datos
 - **BeautifulSoup4** - Web scraping
-- **Uvicorn** - Servidor ASGI
+- **Playwright** - Browser automation
+- **Schedule** - Task scheduling
 
 ### Frontend
 - **React 18** - Librería de UI
@@ -191,6 +319,11 @@ pip install --upgrade -r requirements.txt
 - **Tailwind CSS** - Framework de CSS
 - **Lucide React** - Iconos
 - **Date-fns** - Manipulación de fechas
+
+## 📖 Documentación Completa
+
+- **[DOCKER_SCHEDULER_GUIDE.md](./DOCKER_SCHEDULER_GUIDE.md)** - Guía completa de Docker y Scheduler
+- **[ChangesLog.md](./ChangesLog.md)** - Registro de cambios y actualizaciones
 
 ## 🤝 Contribuir
 
@@ -202,9 +335,14 @@ pip install --upgrade -r requirements.txt
 
 ## 📞 Soporte
 
-Para problemas o preguntas, crear un issue en GitHub o contactar al equipo de desarrollo.
+Para problemas o preguntas:
+1. Revisar [DOCKER_SCHEDULER_GUIDE.md](./DOCKER_SCHEDULER_GUIDE.md)
+2. Ver logs: `docker-compose logs -f scheduler`
+3. Verificar estado: `./run-scheduler.sh status`
+4. Crear un issue en GitHub
 
 ---
 
-**Estado del Proyecto:** ✅ En Desarrollo Activo  
-**Última Actualización:** Agosto 2025
+**Estado del Proyecto:** ✅ **Producción con Automatización ETL**  
+**Última Actualización:** Agosto 2025  
+**Versión:** 2.0.0 (Docker + Scheduler)
