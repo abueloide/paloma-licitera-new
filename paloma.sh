@@ -123,8 +123,28 @@ case $COMMAND in
         
         # Iniciar frontend
         print_status "Iniciando frontend en http://localhost:3001..."
-        cd frontend && npm run dev &
+        cd frontend
+        npm run dev > ../logs/frontend.log 2>&1 &
         FRONTEND_PID=$!
+        cd ..
+        
+        # Esperar a que el frontend esté listo
+        echo -n "Esperando que el frontend arranque"
+        for i in {1..15}; do
+            if curl -s http://localhost:3001 > /dev/null 2>&1; then
+                echo ""
+                print_status "Frontend corriendo (PID: $FRONTEND_PID)"
+                break
+            fi
+            echo -n "."
+            sleep 1
+        done
+        
+        # Verificar si el frontend arrancó
+        if ! curl -s http://localhost:3001 > /dev/null 2>&1; then
+            echo ""
+            print_warning "Frontend puede estar tardando en arrancar. Revisa logs/frontend.log"
+        fi
         
         echo ""
         echo "================================"
@@ -134,13 +154,9 @@ case $COMMAND in
         echo "📚 API Docs: http://localhost:8000/docs"
         echo "--------------------------------"
         echo "Para detener: ./paloma.sh stop"
+        echo "Para ver logs: ./paloma.sh logs"
         echo "================================"
         echo ""
-        
-        # Mostrar logs en tiempo real
-        echo "📋 Logs del backend (Ctrl+C para salir):"
-        echo "----------------------------------------"
-        tail -f logs/backend.log
         ;;
         
     stop)
@@ -192,13 +208,51 @@ case $COMMAND in
         echo "📋 MOSTRANDO LOGS"
         echo "-----------------"
         
-        if [ -f "logs/backend.log" ]; then
-            echo "Últimas 50 líneas del backend:"
-            echo "-------------------------------"
-            tail -50 logs/backend.log
-        else
-            print_warning "No hay logs del backend"
-        fi
+        echo "Selecciona qué logs ver:"
+        echo "1) Backend"
+        echo "2) Frontend"
+        echo "3) Ambos"
+        echo -n "Opción: "
+        read option
+        
+        case $option in
+            1)
+                if [ -f "logs/backend.log" ]; then
+                    echo "Backend logs (últimas 50 líneas):"
+                    echo "-------------------------------"
+                    tail -50 logs/backend.log
+                else
+                    print_warning "No hay logs del backend"
+                fi
+                ;;
+            2)
+                if [ -f "logs/frontend.log" ]; then
+                    echo "Frontend logs (últimas 50 líneas):"
+                    echo "-------------------------------"
+                    tail -50 logs/frontend.log
+                else
+                    print_warning "No hay logs del frontend"
+                fi
+                ;;
+            3)
+                echo "=== BACKEND LOGS ==="
+                if [ -f "logs/backend.log" ]; then
+                    tail -25 logs/backend.log
+                else
+                    print_warning "No hay logs del backend"
+                fi
+                echo ""
+                echo "=== FRONTEND LOGS ==="
+                if [ -f "logs/frontend.log" ]; then
+                    tail -25 logs/frontend.log
+                else
+                    print_warning "No hay logs del frontend"
+                fi
+                ;;
+            *)
+                print_error "Opción inválida"
+                ;;
+        esac
         ;;
         
     *)
@@ -208,7 +262,7 @@ case $COMMAND in
         echo "  start   - Inicia backend y frontend"
         echo "  stop    - Detiene todos los servicios"
         echo "  status  - Muestra el estado del sistema"
-        echo "  logs    - Muestra los logs del backend"
+        echo "  logs    - Muestra los logs del sistema"
         echo ""
         exit 1
         ;;
