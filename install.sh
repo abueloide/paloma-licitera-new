@@ -32,6 +32,52 @@ show_progress() {
     echo -e "${BLUE}🔄 $1...${NC}"
 }
 
+# Función para limpiar Docker completamente
+clean_docker() {
+    echo -e "${YELLOW}🧹 Limpiando instalación anterior...${NC}"
+    
+    # Detener contenedores
+    docker-compose down -v 2>/dev/null || true
+    
+    # Limpiar imágenes relacionadas
+    docker images | grep paloma | awk '{print $3}' | xargs docker rmi -f 2>/dev/null || true
+    docker images | grep none | awk '{print $3}' | xargs docker rmi -f 2>/dev/null || true
+    
+    # Limpiar sistema
+    docker system prune -f 2>/dev/null || true
+    docker volume prune -f 2>/dev/null || true
+    
+    echo -e "${GREEN}✅ Docker limpiado${NC}"
+}
+
+# Función para manejo de errores
+handle_error() {
+    echo -e "${RED}❌ Error en la instalación${NC}"
+    echo -e "${YELLOW}🧹 Limpiando para reintentar...${NC}"
+    clean_docker
+    echo ""
+    echo -e "${CYAN}💡 RECOMENDACIONES:${NC}"
+    echo "   1. Verifica tu conexión a internet"
+    echo "   2. Asegúrate de que Docker esté actualizado"
+    echo "   3. Libera espacio en disco si es necesario"
+    echo "   4. Ejecuta el script nuevamente: ./install.sh"
+    echo ""
+    exit 1
+}
+
+# Trap para limpiar en caso de error
+trap 'handle_error' ERR
+
+# PASO 0: Verificar si es una re-instalación
+if docker-compose ps 2>/dev/null | grep -q "paloma"; then
+    echo -e "${YELLOW}⚠️  Se detectó una instalación anterior${NC}"
+    echo -n "¿Deseas limpiar y reinstalar completamente? (y/N): "
+    read -r response
+    if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+        clean_docker
+    fi
+fi
+
 # PASO 0: Mostrar opciones de instalación
 echo -e "${YELLOW}📋 MÉTODO DE INSTALACIÓN${NC}"
 echo ""
@@ -72,6 +118,8 @@ if [ "$DOCKER_INSTALL" = true ]; then
             exit 1
         else
             echo -e "${GREEN}✅ docker compose encontrado${NC}"
+            # Crear alias para docker-compose
+            alias docker-compose='docker compose'
         fi
     fi
 
@@ -82,6 +130,13 @@ if [ "$DOCKER_INSTALL" = true ]; then
         exit 1
     fi
     echo -e "${GREEN}✅ Docker está ejecutándose correctamente${NC}"
+
+    # Verificar espacio en disco
+    AVAILABLE_SPACE=$(df / | awk 'NR==2 {print $4}')
+    if [ "$AVAILABLE_SPACE" -lt 2097152 ]; then # 2GB en KB
+        echo -e "${YELLOW}⚠️  Espacio en disco bajo (menos de 2GB disponible)${NC}"
+        echo "   La instalación podría fallar por falta de espacio"
+    fi
 
 else
     # Verificar Python 3
@@ -151,19 +206,26 @@ if [ "$DOCKER_INSTALL" = true ]; then
     echo -e "${CYAN}🐳 INSTALACIÓN DOCKER${NC}"
     echo ""
 
-    # PASO 4: Construir contenedores
+    # PASO 4: Construir contenedores con mejor manejo de errores
     echo -e "${YELLOW}🔨 PASO 4: Construyendo contenedores Docker...${NC}"
     echo ""
     
-    show_progress "Construyendo imágenes Docker (esto puede tomar varios minutos)"
-    if docker-compose build --no-cache; then
+    show_progress "Construyendo imágenes Docker (esto puede tomar 5-10 minutos)"
+    echo -e "${BLUE}   ℹ️  Descargando dependencias y configurando Playwright...${NC}"
+    
+    # Construir con timeout y mejor logging
+    if timeout 1200 docker-compose build --no-cache 2>&1 | tee /tmp/docker-build.log; then
         echo -e "${GREEN}✅ Contenedores construidos exitosamente${NC}"
     else
         echo -e "${RED}❌ Error construyendo contenedores${NC}"
-        exit 1
+        echo ""
+        echo -e "${YELLOW}🔍 Últimas líneas del error:${NC}"
+        tail -n 20 /tmp/docker-build.log
+        echo ""
+        handle_error
     fi
 
-    # PASO 5: Iniciar servicios
+    # PASO 5: Iniciar servicios con verificaciones incrementales
     echo ""
     echo -e "${YELLOW}🚀 PASO 5: Iniciando servicios...${NC}"
     echo ""
@@ -174,45 +236,57 @@ if [ "$DOCKER_INSTALL" = true ]; then
     show_progress "Esperando PostgreSQL (30 segundos)"
     sleep 30
 
+    # Verificar PostgreSQL con reintentos
     show_progress "Verificando PostgreSQL"
-    if docker-compose exec -T postgres pg_isready -U postgres; then
-        echo -e "${GREEN}✅ PostgreSQL iniciado correctamente${NC}"
-    else
-        echo -e "${RED}❌ Error iniciando PostgreSQL${NC}"
-        echo "Ver logs: docker-compose logs postgres"
-        exit 1
-    fi
+    for i in {1..5}; do
+        if docker-compose exec -T postgres pg_isready -U postgres >/dev/null 2>&1; then
+            echo -e "${GREEN}✅ PostgreSQL iniciado correctamente${NC}"
+            break
+        else
+            if [ $i -eq 5 ]; then
+                echo -e "${RED}❌ Error iniciando PostgreSQL${NC}"
+                echo "Ver logs: docker-compose logs postgres"
+                handle_error
+            else
+                echo -e "${YELLOW}   Reintento $i/5...${NC}"
+                sleep 10
+            fi
+        fi
+    done
 
     show_progress "Iniciando aplicación y scheduler"
     docker-compose up -d paloma-app scheduler
 
-    # PASO 6: Verificar servicios
+    # PASO 6: Verificar servicios con tiempo suficiente
     echo ""
     echo -e "${YELLOW}✅ PASO 6: Verificando servicios...${NC}"
     echo ""
 
-    sleep 10
+    sleep 15
 
     # Verificar que los contenedores estén corriendo
-    if docker-compose ps | grep -q "running"; then
+    if docker-compose ps | grep -q "Up"; then
         echo -e "${GREEN}✅ Servicios Docker iniciados${NC}"
         docker-compose ps
     else
         echo -e "${RED}❌ Error en servicios Docker${NC}"
-        docker-compose logs
-        exit 1
+        echo ""
+        echo -e "${YELLOW}🔍 Logs de errores:${NC}"
+        docker-compose logs --tail=50
+        handle_error
     fi
 
-    # Verificar API
+    # Verificar API con más reintentos
     show_progress "Verificando API"
-    for i in {1..10}; do
+    for i in {1..15}; do
         if curl -s http://localhost:8000/ > /dev/null 2>&1; then
             echo -e "${GREEN}✅ API respondiendo en http://localhost:8000${NC}"
             break
         fi
-        sleep 3
-        if [ $i -eq 10 ]; then
-            echo -e "${YELLOW}⚠️  API no responde aún, pero puede estar iniciando${NC}"
+        sleep 5
+        if [ $i -eq 15 ]; then
+            echo -e "${YELLOW}⚠️  API no responde aún, pero los servicios están iniciando${NC}"
+            echo "   Verifica en unos minutos: http://localhost:8000"
         fi
     done
 
@@ -225,6 +299,7 @@ if [ "$DOCKER_INSTALL" = true ]; then
     read -r response
     if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
         echo -e "${BLUE}🔄 Ejecutando carga incremental...${NC}"
+        sleep 5  # Dar tiempo a que el scheduler esté completamente listo
         ./run-scheduler.sh incremental
         echo -e "${GREEN}✅ Carga inicial completada${NC}"
     else
@@ -232,7 +307,7 @@ if [ "$DOCKER_INSTALL" = true ]; then
     fi
 
 else
-    # INSTALACIÓN MANUAL
+    # INSTALACIÓN MANUAL (código existente)
     echo ""
     echo -e "${PURPLE}⚡ INSTALACIÓN MANUAL${NC}"
     echo ""
@@ -344,7 +419,7 @@ if [ "$DOCKER_INSTALL" = true ]; then
     echo -n "¿Deseas abrir el dashboard en el navegador? (y/N): "
     read -r response
     if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
-        sleep 2
+        sleep 3
         if command -v open &> /dev/null; then
             open http://localhost:8000
         elif command -v xdg-open &> /dev/null; then
@@ -354,3 +429,6 @@ if [ "$DOCKER_INSTALL" = true ]; then
         fi
     fi
 fi
+
+# Limpiar archivos temporales
+rm -f /tmp/docker-build.log 2>/dev/null || true
