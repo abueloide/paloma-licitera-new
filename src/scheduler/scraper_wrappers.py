@@ -49,7 +49,7 @@ class ComprasMXWrapper(BaseWrapper):
                 hours_since = (datetime.now() - last_run).total_seconds() / 3600
                 return hours_since >= 6
             return True
-        elif modo == "historical":
+        elif modo in ["historical", "descarga_inicial"]:
             return True
         elif modo == "batch":
             return True
@@ -70,18 +70,23 @@ class ComprasMXWrapper(BaseWrapper):
             if last_expediente:
                 env['PALOMA_LAST_EXPEDIENTE'] = last_expediente
                 env['PALOMA_MODE'] = 'incremental'
-                logger.info(f"Modo incremental: buscando desde expediente {last_expediente}")
+                logger.info(f"ComprasMX modo incremental: buscando desde expediente {last_expediente}")
         
-        elif modo == "historical":
+        elif modo in ["historical", "descarga_inicial"]:
             fecha_desde = kwargs.get('fecha_desde')
             if fecha_desde:
                 env['PALOMA_FECHA_DESDE'] = fecha_desde
-                env['PALOMA_MODE'] = 'historical'
-                logger.info(f"Modo histórico: desde {fecha_desde}")
+                if modo == "descarga_inicial":
+                    env['PALOMA_MODE'] = 'descarga_inicial'  # Modo especial para descarga masiva
+                    env['PALOMA_MASSIVE_DOWNLOAD'] = 'true'  # Indicar descarga masiva
+                    logger.info(f"ComprasMX DESCARGA INICIAL MASIVA desde {fecha_desde}")
+                else:
+                    env['PALOMA_MODE'] = 'historical'
+                    logger.info(f"ComprasMX modo histórico desde {fecha_desde}")
         
         # Ejecutar scraper
         try:
-            logger.info(f"Ejecutando ComprasMX scraper en modo {modo}")
+            logger.info(f"🕷️ Ejecutando ComprasMX scraper en modo {modo}")
             process = subprocess.run([
                 sys.executable, str(scraper_path)
             ], capture_output=True, text=True, env=env, cwd=str(scraper_path.parent))
@@ -101,7 +106,7 @@ class DOFWrapper(BaseWrapper):
     def should_run(self, modo: str) -> bool:
         if modo in ["incremental", "batch"]:
             return self.should_run_today()
-        elif modo == "historical":
+        elif modo in ["historical", "descarga_inicial"]:
             return True
         return False
     
@@ -148,14 +153,20 @@ class DOFWrapper(BaseWrapper):
         
         env = os.environ.copy()
         
-        if modo == "historical":
+        if modo in ["historical", "descarga_inicial"]:
             fecha_desde = kwargs.get('fecha_desde')
             if fecha_desde:
                 env['DOF_FECHA_DESDE'] = fecha_desde
-                env['PALOMA_MODE'] = 'historical'
+                if modo == "descarga_inicial":
+                    env['PALOMA_MODE'] = 'descarga_inicial'
+                    # Para DOF en descarga inicial, el scheduler maneja las fechas específicas
+                    logger.info(f"🗓️ DOF DESCARGA INICIAL para fecha: {fecha_desde}")
+                else:
+                    env['PALOMA_MODE'] = 'historical'
+                    logger.info(f"DOF modo histórico para fecha: {fecha_desde}")
         
         try:
-            logger.info(f"Ejecutando DOF scraper en modo {modo}")
+            logger.info(f"🕷️ Ejecutando DOF scraper en modo {modo}")
             process = subprocess.run([
                 sys.executable, str(scraper_path)
             ], capture_output=True, text=True, env=env, cwd=str(scraper_path.parent))
@@ -179,7 +190,7 @@ class TianguisWrapper(BaseWrapper):
                 hours_since = (datetime.now() - last_run).total_seconds() / 3600
                 return hours_since >= 6
             return True
-        return modo in ["historical", "batch"]
+        return modo in ["historical", "batch", "descarga_inicial"]
     
     def run_scraper(self, modo: str = "normal", **kwargs) -> bool:
         scraper_path = self.scrapers_dir / "tianguis-digital" / "extractor-tianguis.py"
@@ -195,15 +206,22 @@ class TianguisWrapper(BaseWrapper):
             if last_uuid:
                 env['PALOMA_LAST_UUID'] = last_uuid
                 env['PALOMA_MODE'] = 'incremental'
+                logger.info(f"Tianguis modo incremental desde UUID: {last_uuid}")
         
-        elif modo == "historical":
+        elif modo in ["historical", "descarga_inicial"]:
             fecha_desde = kwargs.get('fecha_desde')
             if fecha_desde:
                 env['TIANGUIS_FECHA_DESDE'] = fecha_desde
-                env['PALOMA_MODE'] = 'historical'
+                if modo == "descarga_inicial":
+                    env['PALOMA_MODE'] = 'descarga_inicial'
+                    env['PALOMA_MASSIVE_DOWNLOAD'] = 'true'
+                    logger.info(f"Tianguis DESCARGA INICIAL MASIVA desde {fecha_desde}")
+                else:
+                    env['PALOMA_MODE'] = 'historical'
+                    logger.info(f"Tianguis modo histórico desde {fecha_desde}")
         
         try:
-            logger.info(f"Ejecutando Tianguis scraper en modo {modo}")
+            logger.info(f"🕷️ Ejecutando Tianguis scraper en modo {modo}")
             process = subprocess.run([
                 sys.executable, str(scraper_path)
             ], capture_output=True, text=True, env=env, cwd=str(scraper_path.parent))
@@ -223,7 +241,7 @@ class SitiosMasivosWrapper(BaseWrapper):
     def should_run(self, modo: str) -> bool:
         if modo == "weekly":
             return self.should_run_weekly()
-        return modo in ["historical", "batch"]
+        return modo in ["historical", "batch", "descarga_inicial"]
     
     def should_run_weekly(self) -> bool:
         """Verificar si debe ejecutarse semanalmente"""
@@ -248,11 +266,34 @@ class SitiosMasivosWrapper(BaseWrapper):
             logger.error(f"Scraper no encontrado: {scraper_path}")
             return False
         
+        env = os.environ.copy()
+        
+        if modo == "descarga_inicial":
+            env['PALOMA_MODE'] = 'descarga_inicial'
+            env['PALOMA_MASSIVE_DOWNLOAD'] = 'true'
+            logger.info("🌐 Sitios Masivos DESCARGA INICIAL COMPLETA")
+        
         try:
-            logger.info(f"Ejecutando SitiosMasivos scraper en modo {modo}")
-            process = subprocess.run([
-                sys.executable, str(scraper_path)
-            ], capture_output=True, text=True, cwd=str(scraper_path.parent))
+            logger.info(f"🕷️ Ejecutando SitiosMasivos scraper en modo {modo}")
+            
+            # Crear directorio de salida
+            output_dir = Path("data/raw/sitios-masivos")
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Parámetros para descarga masiva si es descarga inicial
+            if modo == "descarga_inicial":
+                process = subprocess.run([
+                    sys.executable, str(scraper_path),
+                    "--sources", "all",
+                    "--mode", "massive",  # Modo especial para descarga masiva
+                    "--out", str(output_dir / "licitaciones.jsonl"),
+                    "--csv", str(output_dir / "licitaciones.csv"),
+                    "--json", str(output_dir / "resumen.json")
+                ], capture_output=True, text=True, env=env, cwd=str(scraper_path.parent))
+            else:
+                process = subprocess.run([
+                    sys.executable, str(scraper_path)
+                ], capture_output=True, text=True, env=env, cwd=str(scraper_path.parent))
             
             if process.returncode == 0:
                 logger.info("✅ SitiosMasivos scraper ejecutado exitosamente")
