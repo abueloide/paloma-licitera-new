@@ -71,6 +71,36 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
     );
   }
 
+  // Helper function to extract values from different data formats
+  const extractOptions = (data: any): string[] => {
+    if (!data) return [];
+    
+    if (Array.isArray(data)) {
+      // If it's already an array of strings
+      if (typeof data[0] === 'string') {
+        return data;
+      }
+      // If it's an array of objects, extract the key names
+      if (typeof data[0] === 'object' && data[0] !== null) {
+        // Look for common field names
+        const firstObj = data[0];
+        if ('fuente' in firstObj) return data.map((item: any) => item.fuente);
+        if ('tipo_contratacion' in firstObj) return data.map((item: any) => item.tipo_contratacion);
+        if ('entidad_compradora' in firstObj) return data.map((item: any) => item.entidad_compradora);
+        if ('estado' in firstObj) return data.map((item: any) => item.estado);
+        // Fallback: use the first property value
+        return data.map((item: any) => Object.values(item)[0] as string);
+      }
+    }
+    
+    return [];
+  };
+
+  const fuentes = extractOptions(filtros.fuentes);
+  const tiposContratacion = extractOptions(filtros.tipos_contratacion);
+  const entidadesCompradoras = extractOptions(filtros.entidades_compradoras);
+  const estados = extractOptions(filtros.estados);
+
   return (
     <Card className="card-shadow mb-8">
       <CardHeader>
@@ -90,8 +120,8 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="">Todas las fuentes</SelectItem>
-              {filtros.fuentes && Array.isArray(filtros.fuentes) && filtros.fuentes.map((fuente) => (
-                <SelectItem key={fuente} value={fuente}>
+              {fuentes.map((fuente, index) => (
+                <SelectItem key={`fuente-${index}-${fuente}`} value={fuente}>
                   {fuente}
                 </SelectItem>
               ))}
@@ -107,9 +137,8 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="">Todos los tipos</SelectItem>
-              {filtros.tipos_contratacion && Array.isArray(filtros.tipos_contratacion) && 
-                filtros.tipos_contratacion.slice(0, 20).map((tipo) => (
-                <SelectItem key={tipo} value={tipo}>
+              {tiposContratacion.slice(0, 20).map((tipo, index) => (
+                <SelectItem key={`tipo-${index}-${tipo}`} value={tipo}>
                   {tipo}
                 </SelectItem>
               ))}
@@ -125,9 +154,8 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="">Todas las entidades</SelectItem>
-              {filtros.entidades_compradoras && Array.isArray(filtros.entidades_compradoras) && 
-                filtros.entidades_compradoras.slice(0, 50).map((entidad) => (
-                <SelectItem key={entidad} value={entidad}>
+              {entidadesCompradoras.slice(0, 50).map((entidad, index) => (
+                <SelectItem key={`entidad-${index}-${entidad}`} value={entidad}>
                   {entidad.length > 30 ? `${entidad.substring(0, 30)}...` : entidad}
                 </SelectItem>
               ))}
@@ -143,9 +171,8 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="">Todos los estados</SelectItem>
-              {filtros.estados && Array.isArray(filtros.estados) && 
-                filtros.estados.map((estado) => (
-                <SelectItem key={estado} value={estado}>
+              {estados.map((estado, index) => (
+                <SelectItem key={`estado-${index}-${estado}`} value={estado}>
                   {estado}
                 </SelectItem>
               ))}
