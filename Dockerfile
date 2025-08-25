@@ -1,10 +1,13 @@
-FROM python:3.11-slim
+# Usar imagen base con más herramientas ya instaladas
+FROM python:3.11
 
-# Actualizar packages 
-RUN apt-get update
+# Configurar variables de entorno para evitar interacciones
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
-# Instalar dependencias básicas del sistema
-RUN apt-get install -y \
+# Actualizar sistema e instalar dependencias básicas
+RUN apt-get update && apt-get install -y \
     postgresql-client \
     wget \
     curl \
@@ -13,33 +16,16 @@ RUN apt-get install -y \
 
 WORKDIR /app
 
-# Copiar requirements primero para cache de Docker
+# Copiar requirements y instalar dependencias Python
 COPY requirements.txt .
-
-# Instalar dependencias Python (sin Playwright)
 RUN pip install --no-cache-dir --upgrade pip
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Crear requirements temporal sin playwright
-RUN grep -v playwright requirements.txt > requirements_temp.txt || cp requirements.txt requirements_temp.txt
+# Instalar solo chromium browser sin dependencias del sistema
+RUN python -c "import playwright; playwright.install(['chromium'])"
 
-# Instalar dependencias básicas
-RUN pip install --no-cache-dir -r requirements_temp.txt
-
-# Instalar Playwright por separado con configuración específica
-RUN pip install --no-cache-dir playwright==1.45.0
-
-# Configurar Playwright sin validaciones de host problemáticas  
-ENV PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-
-# Instalar solo chromium sin dependencias del sistema
-RUN playwright install chromium
-
-# Copiar código fuente
+# Copiar el resto del código
 COPY . .
-
-# Limpiar archivos temporales
-RUN rm -f requirements_temp.txt
 
 # Crear directorios necesarios
 RUN mkdir -p data/raw data/processed logs
