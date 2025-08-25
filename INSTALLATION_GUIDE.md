@@ -5,7 +5,7 @@
 Si tienes problemas con dependencias faltantes, usa este nuevo script que instala TODO:
 
 ```bash
-# 1. Clonar el repositorio
+# 1. Clonar el repositorio (si no lo has hecho)
 git clone https://github.com/abueloide/paloma-licitera-new.git
 cd paloma-licitera-new
 
@@ -16,7 +16,7 @@ chmod +x install_dependencies.sh
 ./install_dependencies.sh
 
 # 4. Iniciar el dashboard
-./start_dashboard_v2.sh
+./start_dashboard.sh
 ```
 
 ## 📋 Requisitos Previos
@@ -82,8 +82,8 @@ El script mostrará checkmarks verdes (✅) para cada componente instalado corre
 Una vez instalado todo:
 
 ```bash
-# Usar el script mejorado v2
-./start_dashboard_v2.sh
+# Usar el script principal
+./start_dashboard.sh
 ```
 
 El dashboard estará disponible en:
@@ -133,20 +133,20 @@ python src/etl.py --all
 ```
 paloma-licitera-new/
 ├── install_dependencies.sh  # ← NUEVO: Instalador completo
-├── start_dashboard_v2.sh    # Script de inicio mejorado
-├── stop_dashboard.sh         # Script para detener
-├── config.yaml              # Configuración de BD
-├── requirements.txt         # Dependencias Python
-├── venv/                    # Entorno virtual Python (se crea)
+├── start_dashboard.sh       # Script de inicio principal
+├── stop_dashboard.sh        # Script para detener
+├── config.yaml             # Configuración de BD
+├── requirements.txt        # Dependencias Python
+├── venv/                   # Entorno virtual Python (se crea)
 ├── src/
-│   ├── api.py              # API FastAPI principal
-│   ├── database.py         # Conexión a PostgreSQL
-│   └── etl.py              # Proceso ETL
+│   ├── api.py             # API FastAPI principal
+│   ├── database.py        # Conexión a PostgreSQL
+│   └── etl.py             # Proceso ETL
 ├── frontend/
-│   ├── package.json        # Dependencias Node.js
-│   ├── node_modules/       # Módulos npm (se crea)
-│   └── src/                # Código React
-└── logs/                   # Logs de la aplicación (se crea)
+│   ├── package.json       # Dependencias Node.js
+│   ├── node_modules/      # Módulos npm (se crea)
+│   └── src/               # Código React
+└── logs/                  # Logs de la aplicación (se crea)
 ```
 
 ## 💡 Tips
