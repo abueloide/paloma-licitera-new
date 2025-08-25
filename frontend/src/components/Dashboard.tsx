@@ -1,6 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from '@/hooks/use-toast';
-import { apiService, Stats, Filtros, LicitacionesResponse, AnalisisPorTipo, Licitacion } from '@/lib/api';
+import { apiService } from '@/services/api';
+import { 
+  Statistics as Stats, 
+  Filtros, 
+  LicitacionesResponse, 
+  AnalisisContratacion as AnalisisPorTipo, 
+  Licitacion 
+} from '@/types';
 
 import Header from './dashboard/Header';
 import MetricCards from './dashboard/MetricCards';
@@ -37,7 +44,7 @@ const Dashboard = () => {
   // Fetch functions
   const fetchStats = useCallback(async () => {
     try {
-      const data = await apiService.getStats();
+      const data = await apiService.getStatistics();
       setStats(data);
     } catch (error) {
       toast({
@@ -52,7 +59,7 @@ const Dashboard = () => {
 
   const fetchFiltros = useCallback(async () => {
     try {
-      const data = await apiService.getFiltros();
+      const data = await apiService.getFilters();
       setFiltros(data);
     } catch (error) {
       toast({
@@ -112,7 +119,7 @@ const Dashboard = () => {
 
   const handleViewDetails = async (licitacion: Licitacion) => {
     try {
-      const detailed = await apiService.getDetalle(licitacion.id);
+      const detailed = await apiService.getLicitacionDetail(licitacion.id);
       setSelectedLicitacion(detailed);
       setModalOpen(true);
     } catch (error) {
@@ -151,17 +158,17 @@ const Dashboard = () => {
     ? [
         { 
           name: 'TIANGUIS', 
-          value: Math.round(stats.total_licitaciones * 0.86), 
+          value: stats.por_fuente?.find(f => f.fuente === 'TIANGUIS')?.cantidad || 0, 
           color: '#3b82f6' 
         },
         { 
           name: 'COMPRASMX', 
-          value: Math.round(stats.total_licitaciones * 0.11), 
+          value: stats.por_fuente?.find(f => f.fuente === 'COMPRASMX')?.cantidad || 0, 
           color: '#a855f7' 
         },
         { 
           name: 'DOF', 
-          value: Math.round(stats.total_licitaciones * 0.02), 
+          value: stats.por_fuente?.find(f => f.fuente === 'DOF')?.cantidad || 0, 
           color: '#059669' 
         },
       ]
