@@ -15,6 +15,24 @@ echo "   Dashboard de Licitaciones v2.0 (Docker + Scheduler)"
 echo -e "=====================================================${NC}"
 echo ""
 
+# Función timeout para macOS
+timeout_cmd() {
+    local timeout_duration=$1
+    shift
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "$timeout_duration" "$@"
+    else
+        # macOS no tiene timeout, usamos gtimeout si está disponible
+        if command -v gtimeout >/dev/null 2>&1; then
+            gtimeout "$timeout_duration" "$@"
+        else
+            # Fallback: ejecutar sin timeout
+            echo -e "${YELLOW}   ⚠️  Ejecutando sin timeout (macOS)${NC}"
+            "$@"
+        fi
+    fi
+}
+
 # Función para verificar comandos
 check_command() {
     if ! command -v $1 &> /dev/null; then
@@ -53,20 +71,18 @@ clean_docker() {
 # Función para manejo de errores
 handle_error() {
     echo -e "${RED}❌ Error en la instalación${NC}"
-    echo -e "${YELLOW}🧹 Limpiando para reintentar...${NC}"
-    clean_docker
     echo ""
-    echo -e "${CYAN}💡 RECOMENDACIONES:${NC}"
-    echo "   1. Verifica tu conexión a internet"
-    echo "   2. Asegúrate de que Docker esté actualizado"
-    echo "   3. Libera espacio en disco si es necesario"
-    echo "   4. Ejecuta el script nuevamente: ./install.sh"
+    echo -e "${YELLOW}🔍 Para diagnosticar el problema:${NC}"
+    echo "   1. Ver logs de PostgreSQL: docker-compose logs postgres"
+    echo "   2. Ver logs completos: docker-compose logs"
+    echo "   3. Verificar puertos: lsof -i :5432 -i :8000"
+    echo ""
+    echo -e "${BLUE}🧹 Para limpiar e intentar de nuevo:${NC}"
+    echo "   ./cleanup.sh"
+    echo "   ./install.sh"
     echo ""
     exit 1
 }
-
-# Trap para limpiar en caso de error
-trap 'handle_error' ERR
 
 # PASO 0: Verificar si es una re-instalación
 if docker-compose ps 2>/dev/null | grep -q "paloma"; then
@@ -131,7 +147,24 @@ if [ "$DOCKER_INSTALL" = true ]; then
     fi
     echo -e "${GREEN}✅ Docker está ejecutándose correctamente${NC}"
 
-    # Verificar espacio en disco
+    # Verificar que no haya conflictos de puertos
+    if lsof -i :5432 >/dev/null 2>&1; then
+        echo -e "${YELLOW}⚠️  Puerto 5432 está en uso (probablemente PostgreSQL local)${NC}"
+        echo "   Esto podría causar conflictos. ¿Continuar? (y/N): "
+        read -r response
+        if [[ ! "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+            echo "   Para usar PostgreSQL local, elige la opción 2 (Manual)"
+            exit 1
+        fi
+    fi
+
+    if lsof -i :8000 >/dev/null 2>&1; then
+        echo -e "${YELLOW}⚠️  Puerto 8000 está en uso${NC}"
+        echo "   Deteniendo proceso en puerto 8000..."
+        lsof -ti :8000 | xargs kill -9 2>/dev/null || true
+    fi
+
+    # Verificar espacio en disco (macOS)
     AVAILABLE_SPACE=$(df / | awk 'NR==2 {print $4}')
     if [ "$AVAILABLE_SPACE" -lt 2097152 ]; then # 2GB en KB
         echo -e "${YELLOW}⚠️  Espacio en disco bajo (menos de 2GB disponible)${NC}"
@@ -139,25 +172,22 @@ if [ "$DOCKER_INSTALL" = true ]; then
     fi
 
 else
-    # Verificar Python 3
+    # Verificaciones para instalación manual
     if ! check_command "python3" "python3 --version 2>&1 | cut -d' ' -f2"; then
         echo -e "${RED}❌ Python 3.8+ requerido${NC}"
         exit 1
     fi
 
-    # Verificar Node.js
     if ! check_command "node" "node --version"; then
         echo -e "${RED}❌ Node.js 16+ requerido${NC}"
         exit 1
     fi
 
-    # Verificar npm
     if ! check_command "npm" "npm --version"; then
         echo -e "${RED}❌ npm requerido${NC}"
         exit 1
     fi
 
-    # Verificar PostgreSQL
     if ! check_command "psql" "psql --version | awk '{print \$3}'"; then
         echo -e "${YELLOW}⚠️  PostgreSQL no encontrado - necesitarás configurarlo${NC}"
     fi
@@ -182,9 +212,6 @@ if [ "$DOCKER_INSTALL" = false ]; then
 fi
 
 echo -e "${GREEN}✅ Directorios creados${NC}"
-echo "   • data/raw - Datos crudos de scrapers"
-echo "   • data/processed - Datos procesados"  
-echo "   • logs - Logs del sistema"
 
 # PASO 3: Configurar permisos de scripts
 echo ""
@@ -192,7 +219,7 @@ echo -e "${YELLOW}🔧 PASO 3: Configurando permisos de scripts...${NC}"
 echo ""
 
 show_progress "Asignando permisos"
-chmod +x docker-start.sh docker-stop.sh run-scheduler.sh 2>/dev/null || true
+chmod +x docker-start.sh docker-stop.sh run-scheduler.sh cleanup.sh 2>/dev/null || true
 
 if [ "$DOCKER_INSTALL" = false ]; then
     chmod +x start_dashboard.sh stop_dashboard.sh 2>/dev/null || true
@@ -206,26 +233,22 @@ if [ "$DOCKER_INSTALL" = true ]; then
     echo -e "${CYAN}🐳 INSTALACIÓN DOCKER${NC}"
     echo ""
 
-    # PASO 4: Construir contenedores con mejor manejo de errores
+    # PASO 4: Construir contenedores
     echo -e "${YELLOW}🔨 PASO 4: Construyendo contenedores Docker...${NC}"
     echo ""
     
-    show_progress "Construyendo imágenes Docker (esto puede tomar 5-10 minutos)"
-    echo -e "${BLUE}   ℹ️  Descargando dependencias y configurando Playwright...${NC}"
+    show_progress "Construyendo imágenes Docker (puede tomar 5-10 minutos)"
+    echo -e "${BLUE}   ℹ️  Descargando dependencias Python y configurando Playwright...${NC}"
     
-    # Construir con timeout y mejor logging
-    if timeout 1200 docker-compose build --no-cache 2>&1 | tee /tmp/docker-build.log; then
+    # Construir con logs visibles
+    if docker-compose build --no-cache; then
         echo -e "${GREEN}✅ Contenedores construidos exitosamente${NC}"
     else
         echo -e "${RED}❌ Error construyendo contenedores${NC}"
-        echo ""
-        echo -e "${YELLOW}🔍 Últimas líneas del error:${NC}"
-        tail -n 20 /tmp/docker-build.log
-        echo ""
         handle_error
     fi
 
-    # PASO 5: Iniciar servicios con verificaciones incrementales
+    # PASO 5: Iniciar servicios paso a paso
     echo ""
     echo -e "${YELLOW}🚀 PASO 5: Iniciando servicios...${NC}"
     echo ""
@@ -233,62 +256,67 @@ if [ "$DOCKER_INSTALL" = true ]; then
     show_progress "Iniciando PostgreSQL"
     docker-compose up -d postgres
 
-    show_progress "Esperando PostgreSQL (30 segundos)"
-    sleep 30
+    show_progress "Esperando PostgreSQL (60 segundos para macOS)"
+    sleep 60
 
-    # Verificar PostgreSQL con reintentos
+    # Verificar PostgreSQL con más intentos para macOS
     show_progress "Verificando PostgreSQL"
-    for i in {1..5}; do
+    POSTGRES_READY=false
+    for i in {1..10}; do
         if docker-compose exec -T postgres pg_isready -U postgres >/dev/null 2>&1; then
             echo -e "${GREEN}✅ PostgreSQL iniciado correctamente${NC}"
+            POSTGRES_READY=true
             break
         else
-            if [ $i -eq 5 ]; then
-                echo -e "${RED}❌ Error iniciando PostgreSQL${NC}"
-                echo "Ver logs: docker-compose logs postgres"
-                handle_error
-            else
-                echo -e "${YELLOW}   Reintento $i/5...${NC}"
-                sleep 10
-            fi
+            echo -e "${YELLOW}   Reintento $i/10... (PostgreSQL puede tardar más en macOS)${NC}"
+            sleep 10
         fi
     done
+
+    if [ "$POSTGRES_READY" = false ]; then
+        echo -e "${RED}❌ PostgreSQL no inició correctamente${NC}"
+        echo ""
+        echo -e "${YELLOW}🔍 Logs de PostgreSQL:${NC}"
+        docker-compose logs postgres
+        handle_error
+    fi
 
     show_progress "Iniciando aplicación y scheduler"
     docker-compose up -d paloma-app scheduler
 
-    # PASO 6: Verificar servicios con tiempo suficiente
+    # PASO 6: Verificar servicios
     echo ""
     echo -e "${YELLOW}✅ PASO 6: Verificando servicios...${NC}"
     echo ""
 
-    sleep 15
+    sleep 20
 
-    # Verificar que los contenedores estén corriendo
-    if docker-compose ps | grep -q "Up"; then
-        echo -e "${GREEN}✅ Servicios Docker iniciados${NC}"
-        docker-compose ps
-    else
-        echo -e "${RED}❌ Error en servicios Docker${NC}"
-        echo ""
-        echo -e "${YELLOW}🔍 Logs de errores:${NC}"
-        docker-compose logs --tail=50
-        handle_error
-    fi
+    # Verificar contenedores
+    echo -e "${BLUE}Estado de contenedores:${NC}"
+    docker-compose ps
 
-    # Verificar API con más reintentos
-    show_progress "Verificando API"
-    for i in {1..15}; do
+    # Verificar API con paciencia para macOS
+    show_progress "Verificando API (puede tardar en macOS)"
+    API_READY=false
+    for i in {1..20}; do
         if curl -s http://localhost:8000/ > /dev/null 2>&1; then
             echo -e "${GREEN}✅ API respondiendo en http://localhost:8000${NC}"
+            API_READY=true
             break
         fi
         sleep 5
-        if [ $i -eq 15 ]; then
-            echo -e "${YELLOW}⚠️  API no responde aún, pero los servicios están iniciando${NC}"
-            echo "   Verifica en unos minutos: http://localhost:8000"
+        if [ $((i % 4)) -eq 0 ]; then
+            echo -e "${YELLOW}   Esperando API... ($i/20)${NC}"
         fi
     done
+
+    if [ "$API_READY" = false ]; then
+        echo -e "${YELLOW}⚠️  API tardando en responder${NC}"
+        echo "   Verifica manualmente en unos minutos: http://localhost:8000"
+        echo ""
+        echo -e "${BLUE}Logs de la aplicación:${NC}"
+        docker-compose logs --tail=20 paloma-app
+    fi
 
     # PASO 7: Primera carga de datos (opcional)
     echo ""
@@ -299,136 +327,83 @@ if [ "$DOCKER_INSTALL" = true ]; then
     read -r response
     if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
         echo -e "${BLUE}🔄 Ejecutando carga incremental...${NC}"
-        sleep 5  # Dar tiempo a que el scheduler esté completamente listo
-        ./run-scheduler.sh incremental
-        echo -e "${GREEN}✅ Carga inicial completada${NC}"
+        sleep 10  # Más tiempo para que el scheduler esté listo
+        if ./run-scheduler.sh incremental; then
+            echo -e "${GREEN}✅ Carga inicial completada${NC}"
+        else
+            echo -e "${YELLOW}⚠️  Error en carga inicial, pero el sistema está funcionando${NC}"
+            echo "   Puedes intentar más tarde: ./run-scheduler.sh incremental"
+        fi
     else
         echo -e "${YELLOW}ℹ️  Puedes ejecutar datos después con: ./run-scheduler.sh incremental${NC}"
     fi
 
 else
-    # INSTALACIÓN MANUAL (código existente)
+    # INSTALACIÓN MANUAL (código simplificado)
     echo ""
     echo -e "${PURPLE}⚡ INSTALACIÓN MANUAL${NC}"
     echo ""
 
-    # PASO 4: Configurar entorno Python
-    echo -e "${YELLOW}📦 PASO 4: Configurando entorno Python...${NC}"
-    echo ""
-
-    show_progress "Creando entorno virtual"
+    show_progress "Configurando Python virtual environment"
     python3 -m venv venv
-    
-    show_progress "Activando entorno virtual"
     source venv/bin/activate
 
-    show_progress "Actualizando pip"
-    pip install --upgrade pip --quiet
-
     show_progress "Instalando dependencias Python"
+    pip install --upgrade pip --quiet
     pip install -r requirements.txt
 
-    echo -e "${GREEN}✅ Entorno Python configurado${NC}"
-
-    # PASO 5: Instalar dependencias Frontend
-    echo ""
-    echo -e "${YELLOW}🎨 PASO 5: Configurando Frontend...${NC}"
-    echo ""
-
+    show_progress "Configurando Frontend"
     cd frontend
-    show_progress "Limpiando caché npm"
     npm cache clean --force
-
-    show_progress "Instalando dependencias npm"
     npm install
-
     cd ..
-    echo -e "${GREEN}✅ Frontend configurado${NC}"
 
-    # PASO 6: Configurar base de datos
-    echo ""
-    echo -e "${YELLOW}🗄️  PASO 6: Configuración de base de datos...${NC}"
-    echo ""
-
-    if command -v psql &> /dev/null; then
-        echo -e "${GREEN}ℹ️  PostgreSQL encontrado${NC}"
-        echo "   Asegúrate de que PostgreSQL esté ejecutándose"
-        echo "   Configura las credenciales en config.yaml"
-    else
-        echo -e "${YELLOW}⚠️  PostgreSQL no encontrado${NC}"
-        echo "   Instala PostgreSQL o configura una instancia remota"
-    fi
+    echo -e "${GREEN}✅ Instalación manual completada${NC}"
 fi
 
 # RESUMEN FINAL
 echo ""
 echo -e "${GREEN}====================================================="
-echo "✅ INSTALACIÓN COMPLETADA CON ÉXITO"
+echo "✅ INSTALACIÓN COMPLETADA"
 echo -e "=====================================================${NC}"
 echo ""
 
 if [ "$DOCKER_INSTALL" = true ]; then
-    echo -e "${CYAN}🐳 INSTALACIÓN DOCKER COMPLETADA${NC}"
-    echo ""
-    echo -e "${BLUE}📋 Servicios iniciados:${NC}"
-    echo "   • PostgreSQL: localhost:5432"
-    echo "   • API REST: http://localhost:8000"
-    echo "   • Scheduler: Modo daemon activo"
-    echo ""
-    echo -e "${YELLOW}🚀 COMANDOS DISPONIBLES:${NC}"
-    echo ""
-    echo -e "   ${GREEN}./run-scheduler.sh status${NC}          # Ver estado del sistema"
-    echo -e "   ${GREEN}./run-scheduler.sh incremental${NC}     # Actualización incremental"
-    echo -e "   ${GREEN}./run-scheduler.sh historico --fuente=all --desde=2025-01-01${NC}  # Descarga histórica"
-    echo -e "   ${GREEN}docker-compose logs -f scheduler${NC}   # Ver logs del scheduler"
-    echo -e "   ${GREEN}./docker-stop.sh${NC}                  # Detener servicios"
+    echo -e "${CYAN}🐳 DOCKER INSTALACIÓN COMPLETADA${NC}"
     echo ""
     echo -e "${PURPLE}📊 ACCESOS:${NC}"
     echo "   • Dashboard: http://localhost:8000"
     echo "   • API Docs: http://localhost:8000/docs"
     echo ""
-    echo -e "${CYAN}🔄 AUTOMATIZACIÓN:${NC}"
-    echo "   • ComprasMX y Tianguis: cada 6 horas"
-    echo "   • DOF: martes y jueves 9:00-10:00 AM y 21:00-22:00 PM"
-    echo "   • Sitios masivos: domingos 2:00 AM"
+    echo -e "${YELLOW}🚀 COMANDOS ÚTILES:${NC}"
+    echo ""
+    echo -e "   ${GREEN}./run-scheduler.sh status${NC}          # Ver estado"
+    echo -e "   ${GREEN}./run-scheduler.sh incremental${NC}     # Actualización"
+    echo -e "   ${GREEN}docker-compose logs -f${NC}            # Ver logs"
+    echo -e "   ${GREEN}./docker-stop.sh${NC}                  # Detener"
+    echo -e "   ${GREEN}./cleanup.sh${NC}                      # Limpiar"
+    echo ""
+    echo -e "${BLUE}🔧 TROUBLESHOOTING:${NC}"
+    echo "   • Logs PostgreSQL: docker-compose logs postgres"
+    echo "   • Logs API: docker-compose logs paloma-app"
+    echo "   • Logs Scheduler: docker-compose logs scheduler"
 
-else
-    echo -e "${PURPLE}⚡ INSTALACIÓN MANUAL COMPLETADA${NC}"
+    # Preguntar si abrir navegador
     echo ""
-    echo -e "${YELLOW}🚀 Para iniciar la aplicación:${NC}"
-    echo ""
-    echo -e "   ${GREEN}./start_dashboard.sh${NC}"
-    echo ""
-    echo -e "${YELLOW}⏹️  Para detener la aplicación:${NC}"
-    echo ""
-    echo -e "   ${GREEN}./stop_dashboard.sh${NC}"
-    echo ""
-    echo -e "${BLUE}📝 NOTAS:${NC}"
-    echo "   • Configura PostgreSQL en config.yaml"
-    echo "   • Los logs se guardan en logs/"
-    echo "   • El frontend estará en http://localhost:3001"
-    echo "   • La API estará en http://localhost:8000"
-fi
-
-echo ""
-echo -e "${GREEN}🎉 ¡Paloma Licitera está lista para usar!${NC}"
-echo ""
-
-# Preguntar si abrir en navegador
-if [ "$DOCKER_INSTALL" = true ]; then
-    echo -n "¿Deseas abrir el dashboard en el navegador? (y/N): "
+    echo -n "¿Abrir dashboard en navegador? (y/N): "
     read -r response
     if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
         sleep 3
         if command -v open &> /dev/null; then
             open http://localhost:8000
-        elif command -v xdg-open &> /dev/null; then
-            xdg-open http://localhost:8000
-        else
-            echo "Abre manualmente: http://localhost:8000"
         fi
     fi
+else
+    echo -e "${PURPLE}⚡ INSTALACIÓN MANUAL COMPLETADA${NC}"
+    echo ""
+    echo -e "   ${GREEN}./start_dashboard.sh${NC}     # Iniciar"
+    echo -e "   ${GREEN}./stop_dashboard.sh${NC}      # Detener"
 fi
 
-# Limpiar archivos temporales
-rm -f /tmp/docker-build.log 2>/dev/null || true
+echo ""
+echo -e "${GREEN}🎉 ¡Paloma Licitera lista para usar!${NC}"
