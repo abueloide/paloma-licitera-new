@@ -2,110 +2,92 @@
 
 Sistema de monitoreo y análisis de licitaciones gubernamentales de México con **automatización ETL y Docker**.
 
-## 🚀 Inicio Rápido
+## 🚀 Instalación Super Rápida
 
-### Opción 1: Docker (Recomendado)
+### ⚡ Un Solo Comando (Recomendado)
 ```bash
-# Clonar repositorio
+# Clonar e instalar automáticamente
 git clone https://github.com/abueloide/paloma-licitera-new.git
 cd paloma-licitera-new
-
-# Dar permisos y ejecutar
-chmod +x docker-start.sh docker-stop.sh run-scheduler.sh
-./docker-start.sh
+chmod +x install.sh
+./install.sh
 ```
 
-**¡Listo!** Servicios disponibles:
-- **Dashboard**: http://localhost:8000
-- **API**: http://localhost:8000/docs
-- **PostgreSQL**: localhost:5432
-- **Scheduler**: Automático en segundo plano
+**¡Eso es todo!** El script te guiará paso a paso y configurará todo automáticamente:
+- 🐳 **Docker** (Opción 1): Instalación completamente automatizada 
+- ⚡ **Manual** (Opción 2): Python + Node.js local
 
-### Opción 2: Instalación Manual
+### 🎯 Resultado Inmediato
+Después de `./install.sh` tendrás:
+- ✅ **Dashboard**: http://localhost:8000
+- ✅ **API REST**: http://localhost:8000/docs  
+- ✅ **Scheduler**: Automatización ETL ejecutándose
+- ✅ **PostgreSQL**: Base de datos lista
+- ✅ **Datos reales**: De fuentes gubernamentales
 
-#### Prerrequisitos
-- Python 3.8+
-- Node.js 16+
-- PostgreSQL 12+
+---
 
-#### Instalación y Ejecución
+## 🐳 Opción Docker (Recomendada)
 
-1. **Instalar dependencias del backend:**
+Si eliges Docker en `./install.sh`, obtienes:
+
+### Servicios Automáticos:
+- **PostgreSQL**: Puerto 5432
+- **API**: http://localhost:8000
+- **Scheduler**: Actualizaciones automáticas
+
+### Comandos Disponibles:
 ```bash
-pip install -r requirements.txt
+# Ver estado del sistema
+./run-scheduler.sh status
+
+# Actualización incremental
+./run-scheduler.sh incremental
+
+# Descarga histórica desde fecha
+./run-scheduler.sh historico --fuente=all --desde=2025-01-01
+
+# Ver logs en tiempo real
+docker-compose logs -f scheduler
+
+# Detener todo
+./docker-stop.sh
 ```
 
-2. **Instalar dependencias del frontend:**
+## ⚡ Opción Manual
+
+Si eliges instalación manual, usar:
 ```bash
-cd frontend
-npm install
+./start_dashboard.sh  # Iniciar
+./stop_dashboard.sh   # Detener
 ```
 
-3. **Inicializar la base de datos:**
-```bash
-python -c "from src.database import DatabaseManager; db = DatabaseManager(); db.create_tables()"
-```
-
-4. **Ejecutar el proyecto completo:**
-```bash
-# Linux/Mac
-./start_project.sh
-
-# Windows
-start_project.bat
-```
-
-Esto iniciará:
-- Backend FastAPI en http://localhost:8000
-- Frontend React en http://localhost:3001
+---
 
 ## 🤖 Sistema de Automatización ETL
 
-### ✨ **¡NOVEDAD!** Scheduler Automático
+### ✨ Scheduler Inteligente Incluido
 
-El sistema incluye un **scheduler inteligente** que automatiza la extracción de datos:
+El sistema incluye automatización completa:
 
-#### Funcionalidades del Scheduler:
-- **🔄 Actualizaciones Incrementales**: Cada 6 horas para ComprasMX y Tianguis
-- **📅 DOF Inteligente**: Solo martes y jueves después de horarios de publicación
-- **📊 Sitios Masivos**: Procesamiento semanal los domingos
-- **🐳 Dockerizado**: Fácil despliegue y escalamiento
-- **📈 Monitoreo**: Estado en tiempo real y métricas detalladas
+#### 🕘 Horarios Automáticos:
+- **🏢 ComprasMX**: Cada 6 horas (00:00, 06:00, 12:00, 18:00)
+- **📅 DOF**: Solo martes y jueves (9:00-10:00 AM, 21:00-22:00 PM)
+- **🏛️ Tianguis CDMX**: Cada 6 horas
+- **📊 Sitios Masivos**: Domingos 2:00 AM
 
-### Comandos del Scheduler
-
+#### 🎛️ Controles Manuales:
 ```bash
 # Estado del sistema
 ./run-scheduler.sh status
 
-# Actualizaciones incrementales
-./run-scheduler.sh incremental
+# Forzar actualización específica
+./run-scheduler.sh incremental --fuente=comprasmx
+./run-scheduler.sh incremental --fuente=dof
+./run-scheduler.sh incremental --fuente=tianguis
 
-# Descarga histórica desde fecha específica
+# Descarga histórica masiva
 ./run-scheduler.sh historico --fuente=all --desde=2025-01-01
-
-# Ejecuciones batch programadas
-./run-scheduler.sh batch diario
-./run-scheduler.sh batch cada_6h
-./run-scheduler.sh batch semanal
-```
-
-### Docker Commands
-
-```bash
-# Iniciar servicios
-./docker-start.sh
-
-# Ver logs en tiempo real
-docker-compose logs -f scheduler
-docker-compose logs -f paloma-app
-
-# Detener servicios
-./docker-stop.sh
-
-# Acceso directo a contenedores
-docker-compose exec scheduler bash
-docker-compose exec postgres psql -U postgres -d paloma_licitera
 ```
 
 ## 📊 Características Principales
@@ -119,12 +101,13 @@ docker-compose exec postgres psql -U postgres -d paloma_licitera
 - **🆕 ETL Automático**: Extracción automatizada desde múltiples fuentes
 - **🆕 Scheduler Inteligente**: Actualizaciones programadas y en tiempo real
 - **🆕 Monitoreo Avanzado**: Estado del sistema y métricas detalladas
+- **🆕 Dockerizado**: Fácil deployment y escalamiento
 - **API REST**: Endpoints completos para todas las funcionalidades
 
 ### 🎯 Fuentes de Datos Soportadas
 
 - **ComprasMX** (comprasgob.gob.mx) - Actualizaciones cada 6h
-- **DOF** (Diario Oficial de la Federación) - Martes y jueves
+- **DOF** (Diario Oficial de la Federación) - Martes y jueves exactos
 - **Tianguis Digital CDMX** - Actualizaciones cada 6h
 - **Sistemas Estatales** - Procesamiento semanal
 
@@ -141,11 +124,13 @@ docker-compose exec postgres psql -U postgres -d paloma_licitera
 
 ```
 paloma-licitera-new/
+├── 🚀 install.sh                  # INSTALACIÓN AUTOMÁTICA
+│
 ├── 🐳 Docker & Automation
 │   ├── Dockerfile              # Contenedor principal
 │   ├── docker-compose.yml      # Orquestación de servicios
-│   ├── init.sql               # Inicialización de BD
-│   └── run-scheduler.sh       # Comandos del scheduler
+│   ├── docker-start.sh         # Inicio rápido
+│   └── run-scheduler.sh        # Comandos del scheduler
 │
 ├── 🤖 Scheduler System
 │   └── src/scheduler/
@@ -182,16 +167,13 @@ paloma-licitera-new/
 
 ```mermaid
 graph TD
-    A[Scheduler Daemon] --> B{Verificar Horario}
-    B -->|6h| C[ComprasMX + Tianguis]
-    B -->|Mar/Jue 9:30+| D[DOF]
-    B -->|Domingo 2 AM| E[Sitios Masivos]
-    C --> F[Ejecutar Scraper]
-    D --> F
-    E --> F
-    F --> G[Procesar Datos ETL]
-    G --> H[Insertar en PostgreSQL]
-    H --> I[Actualizar Dashboard]
+    A[install.sh] --> B{¿Docker o Manual?}
+    B -->|Docker| C[Contenedores + Scheduler]
+    B -->|Manual| D[Python Local + Scripts]
+    C --> E[Automatización Completa]
+    D --> F[Control Manual]
+    E --> G[Dashboard con Datos]
+    F --> G
 ```
 
 ## 📋 API Endpoints
@@ -211,103 +193,106 @@ graph TD
 
 ## 🔧 Configuración Avanzada
 
-### Variables de Entorno Docker
-```yaml
-# docker-compose.yml
-environment:
-  - DATABASE_HOST=postgres
-  - DATABASE_PORT=5432
-  - DATABASE_NAME=paloma_licitera
-  - DATABASE_USER=postgres
-  - DATABASE_PASSWORD=postgres123
-```
+### Docker (Automático)
+El `install.sh` configura todo automáticamente:
+- Variables de entorno
+- Volúmenes de datos
+- Network interno
+- Configuración del scheduler
 
-### Configuración del Scheduler
+### Manual (Personalizable)
 ```yaml
 # config.yaml
+database:
+  host: localhost
+  port: 5432
+  name: paloma_licitera
+  
 automation:
   batch_config:
     diario: 
       hora: "06:00"
       fuentes: ["comprasmx", "dof", "tianguis"]
-    cada_6h:
-      horas: ["06:00", "12:00", "18:00", "00:00"]
-      fuentes: ["comprasmx", "tianguis"]
-    semanal:
-      dia: "domingo"
-      hora: "02:00"
-      fuentes: ["sitios-masivos"]
 ```
 
-## 🛠️ Desarrollo
+## 🛠️ Desarrollo y Debugging
 
-### Backend (FastAPI)
+### Docker Development
 ```bash
-# Ejecutar solo el backend
-cd src
-uvicorn api:app --reload --port 8000
+# Logs detallados
+docker-compose logs -f scheduler
+docker-compose logs -f paloma-app
+
+# Acceso directo a contenedores
+docker-compose exec scheduler bash
+docker-compose exec postgres psql -U postgres -d paloma_licitera
+
+# Reiniciar servicios específicos
+docker-compose restart scheduler
 ```
 
-### Frontend (React + Vite)
+### Manual Development
 ```bash
-# Ejecutar solo el frontend
-cd frontend
-npm run dev
-```
+# Activar entorno
+source venv/bin/activate
 
-### Scheduler (Desarrollo)
-```bash
-# Ejecutar scheduler localmente
-python -m src.scheduler --help
+# Ejecutar backend
+python src/api.py
+
+# Ejecutar frontend (en otra terminal)
+cd frontend && npm run dev
+
+# Scheduler manual
 python -m src.scheduler status
-python -m src.scheduler incremental
 ```
 
 ## 🚨 Solución de Problemas
 
-### Docker Issues
+### Problemas Comunes
+
+**🐳 Docker no inicia:**
 ```bash
-# Ver logs detallados
-docker-compose logs scheduler
-docker-compose logs paloma-app
+# Verificar Docker
+docker --version
+docker ps
 
-# Reiniciar servicios
-./docker-stop.sh && ./docker-start.sh
-
-# Reconstruir contenedores
-docker-compose down && docker-compose build && docker-compose up -d
+# Reconstruir
+docker-compose down
+docker-compose build --no-cache
+docker-compose up -d
 ```
 
-### Database Issues
+**📊 Sin datos en dashboard:**
 ```bash
-# Verificar PostgreSQL
-docker-compose exec postgres pg_isready -U postgres
+# Ejecutar carga inicial
+./run-scheduler.sh incremental
 
-# Ver estadísticas
-docker-compose exec postgres psql -U postgres -d paloma_licitera -c "
-SELECT fuente, COUNT(*) as total, MAX(fecha_captura) as ultima_actualizacion
-FROM licitaciones GROUP BY fuente ORDER BY total DESC;"
-```
-
-### Scheduler Issues
-```bash
-# Estado detallado
+# Ver estado
 ./run-scheduler.sh status
 
-# Logs del scheduler
-docker-compose logs -f scheduler
+# Forzar descarga histórica
+./run-scheduler.sh historico --fuente=all --desde=2025-01-01
+```
 
-# Ejecutar manualmente
-./run-scheduler.sh incremental --fuente=comprasmx
+**⏰ Scheduler no ejecuta:**
+```bash
+# Ver logs del scheduler
+docker-compose logs scheduler
+
+# Estado detallado
+./run-scheduler.sh status | jq '.'
+
+# Verificar horarios DOF
+./run-scheduler.sh status | jq '.fuentes.dof'
 ```
 
 ## 📚 Tecnologías Utilizadas
 
 ### Backend & Automation
-- **FastAPI** - Framework web moderno para Python
-- **PostgreSQL** - Base de datos robusta y escalable
-- **Docker** - Containerización y orquestación
-- **Pandas** - Manipulación y análisis de datos
+- **FastAPI** - Framework web moderno
+- **PostgreSQL** - Base de datos robusta
+- **Docker** - Containerización
+- **Pandas** - Análisis de datos
 - **BeautifulSoup4** - Web scraping
 - **Playwright** - Browser automation
 - **Schedule** - Task scheduling
@@ -315,34 +300,46 @@ docker-compose logs -f scheduler
 ### Frontend
 - **React 18** - Librería de UI
 - **TypeScript** - Tipado estático
-- **Vite** - Build tool y dev server
-- **Tailwind CSS** - Framework de CSS
-- **Lucide React** - Iconos
-- **Date-fns** - Manipulación de fechas
+- **Vite** - Build tool
+- **Tailwind CSS** - Framework CSS
 
 ## 📖 Documentación Completa
 
 - **[DOCKER_SCHEDULER_GUIDE.md](./DOCKER_SCHEDULER_GUIDE.md)** - Guía completa de Docker y Scheduler
-- **[ChangesLog.md](./ChangesLog.md)** - Registro de cambios y actualizaciones
+- **[ChangesLog.md](./ChangesLog.md)** - Registro de cambios
 
 ## 🤝 Contribuir
 
 1. Fork el repositorio
-2. Crear una rama feature (`git checkout -b feature/AmazingFeature`)
-3. Commit los cambios (`git commit -m 'Add some AmazingFeature'`)
-4. Push a la rama (`git push origin feature/AmazingFeature`)
-5. Abrir un Pull Request
+2. Instalar: `./install.sh`
+3. Crear rama feature: `git checkout -b feature/AmazingFeature`
+4. Commit cambios: `git commit -m 'Add some AmazingFeature'`
+5. Push: `git push origin feature/AmazingFeature`
+6. Abrir Pull Request
 
-## 📞 Soporte
+## 📞 Soporte y Troubleshooting
 
-Para problemas o preguntas:
-1. Revisar [DOCKER_SCHEDULER_GUIDE.md](./DOCKER_SCHEDULER_GUIDE.md)
-2. Ver logs: `docker-compose logs -f scheduler`
-3. Verificar estado: `./run-scheduler.sh status`
-4. Crear un issue en GitHub
+### Primeros Pasos
+1. **Ejecutar**: `./install.sh` y seguir instrucciones
+2. **Estado**: `./run-scheduler.sh status` (Docker)
+3. **Logs**: `docker-compose logs -f scheduler`
+4. **Documentación**: [DOCKER_SCHEDULER_GUIDE.md](./DOCKER_SCHEDULER_GUIDE.md)
+
+### Issues Comunes
+- **Puerto ocupado**: Cambiar puertos en `docker-compose.yml`
+- **Permisos**: `chmod +x *.sh`
+- **Docker no inicia**: Verificar Docker Desktop/daemon
+- **Sin datos**: Ejecutar `./run-scheduler.sh incremental`
+
+Para problemas específicos, crear un issue en GitHub con:
+- Comando ejecutado
+- Error completo
+- Logs: `docker-compose logs`
 
 ---
 
-**Estado del Proyecto:** ✅ **Producción con Automatización ETL**  
+**Estado del Proyecto:** ✅ **Producción con Instalador Automático**  
 **Última Actualización:** Agosto 2025  
-**Versión:** 2.0.0 (Docker + Scheduler)
+**Versión:** 2.1.0 (Install.sh + Docker + Scheduler)
+
+**🚀 ¡Un solo comando y listo!** → `./install.sh`
