@@ -318,24 +318,57 @@ if [ "$DOCKER_INSTALL" = true ]; then
         docker-compose logs --tail=20 paloma-app
     fi
 
-    # PASO 7: Primera carga de datos (opcional)
+    # PASO 7: DESCARGA INICIAL REAL (12 MESES)
     echo ""
-    echo -e "${YELLOW}📊 PASO 7: Carga inicial de datos${NC}"
+    echo -e "${YELLOW}📊 PASO 7: Descarga inicial de datos (12 meses)${NC}"
     echo ""
     
-    echo -n "¿Deseas ejecutar una carga inicial de datos? (y/N): "
+    echo -e "${BLUE}💡 DESCARGA INICIAL = Últimos 12 meses de licitaciones${NC}"
+    echo "   • ComprasMX: ~50,000-100,000 registros"
+    echo "   • DOF: ~5,000-10,000 registros" 
+    echo "   • Tianguis Digital: ~10,000-20,000 registros"
+    echo "   • Tiempo estimado: 30-60 minutos"
+    echo ""
+    
+    echo -n "¿Ejecutar descarga inicial completa (12 meses)? (Y/n): "
     read -r response
-    if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
-        echo -e "${BLUE}🔄 Ejecutando carga incremental...${NC}"
-        sleep 10  # Más tiempo para que el scheduler esté listo
-        if ./run-scheduler.sh incremental; then
-            echo -e "${GREEN}✅ Carga inicial completada${NC}"
+    if [[ ! "$response" =~ ^([nN][oO]|[nN])$ ]]; then
+        # Calcular fecha de hace 12 meses
+        if command -v gdate >/dev/null 2>&1; then
+            # macOS con GNU date
+            FECHA_INICIAL=$(gdate -d "12 months ago" +%Y-%m-%d)
+        elif date -v-12m >/dev/null 2>&1; then
+            # macOS con BSD date
+            FECHA_INICIAL=$(date -v-12m +%Y-%m-%d)
         else
-            echo -e "${YELLOW}⚠️  Error en carga inicial, pero el sistema está funcionando${NC}"
-            echo "   Puedes intentar más tarde: ./run-scheduler.sh incremental"
+            # Linux con GNU date
+            FECHA_INICIAL=$(date -d "12 months ago" +%Y-%m-%d)
+        fi
+        
+        echo -e "${GREEN}🗓️  Descargando desde: $FECHA_INICIAL${NC}"
+        echo -e "${BLUE}🔄 Iniciando descarga histórica de 12 meses...${NC}"
+        echo -e "${YELLOW}   ⏳ Esto tomará tiempo, mantén la terminal abierta...${NC}"
+        
+        sleep 5  # Tiempo para que el scheduler esté completamente listo
+        
+        if ./run-scheduler.sh historico --fuente=all --desde="$FECHA_INICIAL"; then
+            echo -e "${GREEN}✅ Descarga inicial completada${NC}"
+            
+            # Mostrar estadísticas
+            echo ""
+            echo -e "${CYAN}📊 ESTADÍSTICAS DE DESCARGA:${NC}"
+            ./run-scheduler.sh status | grep -A 10 "by_source" || echo "   Ver estadísticas en: ./run-scheduler.sh status"
+            
+        else
+            echo -e "${YELLOW}⚠️  Error en descarga inicial, pero el sistema está funcionando${NC}"
+            echo "   Puedes intentar más tarde con:"
+            echo "   ./run-scheduler.sh historico --fuente=all --desde=$FECHA_INICIAL"
         fi
     else
-        echo -e "${YELLOW}ℹ️  Puedes ejecutar datos después con: ./run-scheduler.sh incremental${NC}"
+        echo -e "${YELLOW}ℹ️  Descarga inicial omitida${NC}"
+        echo "   Puedes ejecutar después:"
+        echo "   ./run-scheduler.sh historico --fuente=all --desde=2024-01-01"
+        echo "   ./run-scheduler.sh incremental  # Solo nuevas licitaciones"
     fi
 
 else
@@ -377,8 +410,9 @@ if [ "$DOCKER_INSTALL" = true ]; then
     echo ""
     echo -e "${YELLOW}🚀 COMANDOS ÚTILES:${NC}"
     echo ""
-    echo -e "   ${GREEN}./run-scheduler.sh status${NC}          # Ver estado"
-    echo -e "   ${GREEN}./run-scheduler.sh incremental${NC}     # Actualización"
+    echo -e "   ${GREEN}./run-scheduler.sh status${NC}          # Ver estado y estadísticas"
+    echo -e "   ${GREEN}./run-scheduler.sh incremental${NC}     # Nuevas licitaciones"
+    echo -e "   ${GREEN}./run-scheduler.sh historico --fuente=comprasmx --desde=2024-06-01${NC}  # Histórico específico"
     echo -e "   ${GREEN}docker-compose logs -f${NC}            # Ver logs"
     echo -e "   ${GREEN}./docker-stop.sh${NC}                  # Detener"
     echo -e "   ${GREEN}./cleanup.sh${NC}                      # Limpiar"
