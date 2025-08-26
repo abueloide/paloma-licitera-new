@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ interface FiltersProps {
   onFilterChange: (filters: {
     tipo_contratacion?: string[];
     entidad_compradora?: string[];
+    tipo_procedimiento?: string[];
     dias_apertura?: number;
     busqueda?: string;
   }) => void;
@@ -19,8 +20,10 @@ interface FiltersProps {
 const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
   const [selectedTipos, setSelectedTipos] = useState<string[]>([]);
   const [selectedEntidades, setSelectedEntidades] = useState<string[]>([]);
+  const [selectedProcedimientos, setSelectedProcedimientos] = useState<string[]>([]);
   const [diasApertura, setDiasApertura] = useState<string>("");
   const [busqueda, setBusqueda] = useState("");
+  const [initialLoad, setInitialLoad] = useState(true);
 
   const extractOptions = (data: any, fieldName: string): Array<{value: string, count: number}> => {
     if (!data) return [];
@@ -44,32 +47,58 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
 
   const tiposContratacion = extractOptions(filtros?.tipos_contratacion, 'tipo_contratacion');
   const entidadesCompradoras = extractOptions(filtros?.top_entidades, 'entidad_compradora');
+  const tiposProcedimiento = extractOptions(filtros?.tipos_procedimiento, 'tipo_procedimiento');
+
+  // Inicializar con todos los procedimientos EXCEPTO "ADJUDICACION_DIRECTA" al cargar
+  useEffect(() => {
+    if (initialLoad && tiposProcedimiento.length > 0) {
+      const procedimientosFiltrados = tiposProcedimiento
+        .filter(proc => !proc.value.toUpperCase().includes('ADJUDICACION') && 
+                       !proc.value.toUpperCase().includes('DIRECTA'))
+        .map(proc => proc.value);
+      
+      setSelectedProcedimientos(procedimientosFiltrados);
+      setInitialLoad(false);
+      
+      // Aplicar filtro inicial
+      if (procedimientosFiltrados.length > 0) {
+        applyFilters(selectedTipos, selectedEntidades, procedimientosFiltrados, diasApertura);
+      }
+    }
+  }, [tiposProcedimiento, initialLoad]);
 
   const handleTipoChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selectedOptions = Array.from(e.target.selectedOptions, option => option.value);
     const filteredOptions = selectedOptions.filter(opt => opt !== 'all');
     setSelectedTipos(filteredOptions);
-    applyFilters(filteredOptions, selectedEntidades, diasApertura);
+    applyFilters(filteredOptions, selectedEntidades, selectedProcedimientos, diasApertura);
   };
 
   const handleEntidadChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selectedOptions = Array.from(e.target.selectedOptions, option => option.value);
     const filteredOptions = selectedOptions.filter(opt => opt !== 'all');
     setSelectedEntidades(filteredOptions);
-    applyFilters(selectedTipos, filteredOptions, diasApertura);
+    applyFilters(selectedTipos, filteredOptions, selectedProcedimientos, diasApertura);
+  };
+
+  const handleProcedimientoChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const selectedOptions = Array.from(e.target.selectedOptions, option => option.value);
+    const filteredOptions = selectedOptions.filter(opt => opt !== 'all');
+    setSelectedProcedimientos(filteredOptions);
+    applyFilters(selectedTipos, selectedEntidades, filteredOptions, diasApertura);
   };
 
   const handleDiasAperturaChange = (value: string) => {
     setDiasApertura(value);
-    applyFilters(selectedTipos, selectedEntidades, value);
+    applyFilters(selectedTipos, selectedEntidades, selectedProcedimientos, value);
   };
 
   const handleBusquedaChange = (value: string) => {
     setBusqueda(value);
-    applyFilters(selectedTipos, selectedEntidades, diasApertura, value);
+    applyFilters(selectedTipos, selectedEntidades, selectedProcedimientos, diasApertura, value);
   };
 
-  const applyFilters = (tipos: string[], entidades: string[], dias: string, search: string = busqueda) => {
+  const applyFilters = (tipos: string[], entidades: string[], procedimientos: string[], dias: string, search: string = busqueda) => {
     const filters: any = {};
     
     if (tipos.length > 0) {
@@ -78,6 +107,10 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
     
     if (entidades.length > 0) {
       filters.entidad_compradora = entidades;
+    }
+    
+    if (procedimientos.length > 0) {
+      filters.tipo_procedimiento = procedimientos;
     }
     
     if (dias && !isNaN(parseInt(dias))) {
@@ -94,9 +127,17 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
   const handleReset = () => {
     setSelectedTipos([]);
     setSelectedEntidades([]);
+    // Al resetear, volver a excluir adjudicación directa
+    const procedimientosFiltrados = tiposProcedimiento
+      .filter(proc => !proc.value.toUpperCase().includes('ADJUDICACION') && 
+                     !proc.value.toUpperCase().includes('DIRECTA'))
+      .map(proc => proc.value);
+    setSelectedProcedimientos(procedimientosFiltrados);
     setDiasApertura("");
     setBusqueda("");
-    onFilterChange({});
+    
+    // Aplicar filtros con adjudicación directa excluida
+    applyFilters([], [], procedimientosFiltrados, "", "");
   };
 
   if (loading || !filtros) {
@@ -109,8 +150,8 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            {[1, 2, 3, 4].map((i) => (
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            {[1, 2, 3, 4, 5].map((i) => (
               <div key={i} className="h-10 bg-muted animate-pulse rounded"></div>
             ))}
           </div>
@@ -128,7 +169,7 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           {/* Filtro de Entidades */}
           <div className="space-y-2">
             <label className="text-sm font-medium">Entidad Compradora</label>
@@ -152,9 +193,6 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
                 {selectedEntidades.length} seleccionada(s)
               </div>
             )}
-            <div className="text-xs text-gray-500">
-              Ctrl/Cmd + Click para selección múltiple
-            </div>
           </div>
 
           {/* Filtro de Tipos de Contratación */}
@@ -178,6 +216,38 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
                 {selectedTipos.length} seleccionado(s)
               </div>
             )}
+          </div>
+
+          {/* Filtro de Tipo de Procedimiento */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Tipo de Procedimiento</label>
+            <select
+              multiple
+              className="w-full min-h-[100px] p-2 border rounded-md text-sm"
+              value={selectedProcedimientos}
+              onChange={handleProcedimientoChange}
+            >
+              <option value="all" disabled className="font-semibold">-- Seleccionar --</option>
+              {tiposProcedimiento.map((proc, index) => {
+                const isAdjudicacionDirecta = proc.value.toUpperCase().includes('ADJUDICACION') || 
+                                            proc.value.toUpperCase().includes('DIRECTA');
+                return (
+                  <option 
+                    key={`proc-${index}`} 
+                    value={proc.value}
+                    className={isAdjudicacionDirecta ? 'text-gray-400' : ''}
+                  >
+                    {proc.value} ({proc.count})
+                    {isAdjudicacionDirecta && ' (deseleccionado por defecto)'}
+                  </option>
+                );
+              })}
+            </select>
+            {selectedProcedimientos.length > 0 && (
+              <div className="text-xs text-muted-foreground">
+                {selectedProcedimientos.length} seleccionado(s)
+              </div>
+            )}
             <div className="text-xs text-gray-500">
               Ctrl/Cmd + Click para selección múltiple
             </div>
@@ -197,7 +267,7 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
               min="1"
             />
             <div className="text-xs text-gray-500">
-              Licitaciones que abren en los próximos X días
+              Próximos X días
             </div>
           </div>
 
