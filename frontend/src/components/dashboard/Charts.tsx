@@ -1,29 +1,55 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { AnalisisPorTipo } from "@/lib/api";
-import { formatMoney } from "@/lib/formatters";
 
 interface ChartsProps {
-  fuentesData: Array<{ name: string; value: number; color: string }>;
   tiposData: AnalisisPorTipo[];
+  temporalData?: Array<{ mes: string; cantidad: number; acumulado: number }>;
   loading: boolean;
 }
 
-const Charts = ({ fuentesData, tiposData, loading }: ChartsProps) => {
-  const COLORS = {
-    TIANGUIS: '#3b82f6',    // blue-500
-    COMPRASMX: '#a855f7',   // purple-500
-    DOF: '#059669',         // green-600
+const Charts = ({ tiposData, temporalData, loading }: ChartsProps) => {
+  // Colores para el gráfico de pie de tipos de contratación
+  const COLORS = [
+    '#3b82f6', // blue-500
+    '#a855f7', // purple-500
+    '#059669', // green-600
+    '#f59e0b', // amber-500
+    '#ef4444', // red-500
+    '#10b981', // emerald-500
+    '#6366f1', // indigo-500
+    '#ec4899', // pink-500
+    '#14b8a6', // teal-500
+    '#f97316', // orange-500
+  ];
+
+  // Preparar datos para el gráfico de pie (distribución por tipo de contratación)
+  const pieData = tiposData.slice(0, 10).map((tipo, index) => ({
+    name: tipo.tipo_contratacion || 'Sin tipo',
+    value: tipo.cantidad || tipo.total || 0,
+    color: COLORS[index % COLORS.length]
+  }));
+
+  // Formatear datos temporales para mostrar mes corto
+  const formatMonth = (mes: string) => {
+    const [year, month] = mes.split('-');
+    const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 
+                       'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+    return monthNames[parseInt(month) - 1] + ' ' + year.substring(2);
   };
 
-  const top10Tipos = tiposData.slice(0, 10);
+  const lineData = temporalData?.map(item => ({
+    mes: formatMonth(item.mes),
+    cantidad: item.cantidad,
+    acumulado: item.acumulado
+  })) || [];
 
   if (loading) {
     return (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <Card className="card-shadow">
           <CardHeader>
-            <CardTitle>Distribución por Fuente</CardTitle>
+            <CardTitle>Distribución por Tipo de Contratación</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="h-64 bg-muted animate-pulse rounded"></div>
@@ -31,7 +57,7 @@ const Charts = ({ fuentesData, tiposData, loading }: ChartsProps) => {
         </Card>
         <Card className="card-shadow">
           <CardHeader>
-            <CardTitle>Top 10 Tipos de Contratación</CardTitle>
+            <CardTitle>Licitaciones Acumuladas del Año</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="h-64 bg-muted animate-pulse rounded"></div>
@@ -43,59 +69,79 @@ const Charts = ({ fuentesData, tiposData, loading }: ChartsProps) => {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+      {/* Distribución por Tipo de Contratación */}
       <Card className="card-shadow">
         <CardHeader>
-          <CardTitle>Distribución por Fuente</CardTitle>
+          <CardTitle>Distribución por Tipo de Contratación</CardTitle>
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={300}>
             <PieChart>
               <Pie
-                data={fuentesData}
+                data={pieData}
                 cx="50%"
                 cy="50%"
                 labelLine={false}
-                label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                label={({ name, percent }) => {
+                  const shortName = name.length > 20 ? `${name.substring(0, 20)}...` : name;
+                  return `${shortName} ${(percent * 100).toFixed(0)}%`;
+                }}
                 outerRadius={80}
                 fill="#8884d8"
                 dataKey="value"
               >
-                {fuentesData.map((entry, index) => (
+                {pieData.map((entry, index) => (
                   <Cell key={`cell-${index}`} fill={entry.color} />
                 ))}
               </Pie>
-              <Tooltip formatter={(value: any) => [value.toLocaleString(), 'Licitaciones']} />
+              <Tooltip 
+                formatter={(value: any) => [value.toLocaleString(), 'Licitaciones']}
+                contentStyle={{ fontSize: '12px' }}
+              />
             </PieChart>
           </ResponsiveContainer>
         </CardContent>
       </Card>
 
+      {/* Licitaciones Acumuladas del Año */}
       <Card className="card-shadow">
         <CardHeader>
-          <CardTitle>Top 10 Tipos de Contratación</CardTitle>
+          <CardTitle>Licitaciones Acumuladas del Año (Por Fecha de Publicación)</CardTitle>
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={top10Tipos} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+            <LineChart data={lineData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis 
-                dataKey="tipo_contratacion" 
-                angle={-45}
-                textAnchor="end"
-                height={100}
+                dataKey="mes"
                 fontSize={12}
-                tickFormatter={(value) => value.length > 15 ? `${value.substring(0, 15)}...` : value}
               />
-              <YAxis />
+              <YAxis fontSize={12} />
               <Tooltip 
                 formatter={(value: any, name: string) => [
-                  name === 'total' ? value.toLocaleString() : formatMoney(Number(value)),
-                  name === 'total' ? 'Licitaciones' : 'Monto Total'
+                  value.toLocaleString(),
+                  name === 'cantidad' ? 'Nuevas' : 'Total Acumulado'
                 ]}
-                labelFormatter={(label) => `Tipo: ${label}`}
+                labelFormatter={(label) => `Mes: ${label}`}
+                contentStyle={{ fontSize: '12px' }}
               />
-              <Bar dataKey="total" fill="#a855f7" name="total" />
-            </BarChart>
+              <Line 
+                type="monotone" 
+                dataKey="cantidad" 
+                stroke="#a855f7" 
+                name="cantidad"
+                strokeWidth={2}
+                dot={{ r: 3 }}
+              />
+              <Line 
+                type="monotone" 
+                dataKey="acumulado" 
+                stroke="#3b82f6" 
+                name="acumulado"
+                strokeWidth={2}
+                dot={{ r: 3 }}
+              />
+            </LineChart>
           </ResponsiveContainer>
         </CardContent>
       </Card>
