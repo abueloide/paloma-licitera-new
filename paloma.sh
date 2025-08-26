@@ -20,6 +20,9 @@ print_status() { echo -e "${GREEN}✅ $1${NC}"; }
 print_error() { echo -e "${RED}❌ $1${NC}"; }
 print_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
 
+# Guardar el directorio base
+BASE_DIR=$(pwd)
+
 # Detectar el comando a ejecutar
 COMMAND=${1:-install}
 
@@ -56,7 +59,8 @@ case $COMMAND in
         
         # Instalar frontend
         print_status "Instalando dependencias del frontend..."
-        cd frontend && npm install && cd ..
+        cd "$BASE_DIR/frontend" && npm install
+        cd "$BASE_DIR"
         
         # Verificar PostgreSQL
         if psql -h localhost -U postgres -d paloma_licitera -c "SELECT 1" > /dev/null 2>&1; then
@@ -94,9 +98,8 @@ case $COMMAND in
         # Iniciar backend
         print_status "Iniciando backend en http://localhost:8000..."
         source venv/bin/activate
-        cd src && python -m uvicorn api:app --reload --host 0.0.0.0 --port 8000 > ../logs/backend.log 2>&1 &
+        cd "$BASE_DIR/src" && python -m uvicorn api:app --reload --host 0.0.0.0 --port 8000 > "$BASE_DIR/logs/backend.log" 2>&1 &
         BACKEND_PID=$!
-        cd ..
         
         # Esperar a que el backend esté listo (máximo 30 segundos)
         echo -n "Esperando que el backend arranque"
@@ -117,16 +120,14 @@ case $COMMAND in
             echo "Revisa logs/backend.log para más detalles"
             echo ""
             echo "Últimas líneas del log:"
-            tail -20 logs/backend.log
+            tail -20 "$BASE_DIR/logs/backend.log"
             exit 1
         fi
         
-        # Iniciar frontend
+        # Iniciar frontend (asegurarnos de estar en el directorio correcto)
         print_status "Iniciando frontend en http://localhost:3001..."
-        cd frontend
-        npm run dev > ../logs/frontend.log 2>&1 &
+        cd "$BASE_DIR/frontend" && npm run dev > "$BASE_DIR/logs/frontend.log" 2>&1 &
         FRONTEND_PID=$!
-        cd ..
         
         # Esperar a que el frontend esté listo
         echo -n "Esperando que el frontend arranque"
@@ -217,34 +218,34 @@ case $COMMAND in
         
         case $option in
             1)
-                if [ -f "logs/backend.log" ]; then
+                if [ -f "$BASE_DIR/logs/backend.log" ]; then
                     echo "Backend logs (últimas 50 líneas):"
                     echo "-------------------------------"
-                    tail -50 logs/backend.log
+                    tail -50 "$BASE_DIR/logs/backend.log"
                 else
                     print_warning "No hay logs del backend"
                 fi
                 ;;
             2)
-                if [ -f "logs/frontend.log" ]; then
+                if [ -f "$BASE_DIR/logs/frontend.log" ]; then
                     echo "Frontend logs (últimas 50 líneas):"
                     echo "-------------------------------"
-                    tail -50 logs/frontend.log
+                    tail -50 "$BASE_DIR/logs/frontend.log"
                 else
                     print_warning "No hay logs del frontend"
                 fi
                 ;;
             3)
                 echo "=== BACKEND LOGS ==="
-                if [ -f "logs/backend.log" ]; then
-                    tail -25 logs/backend.log
+                if [ -f "$BASE_DIR/logs/backend.log" ]; then
+                    tail -25 "$BASE_DIR/logs/backend.log"
                 else
                     print_warning "No hay logs del backend"
                 fi
                 echo ""
                 echo "=== FRONTEND LOGS ==="
-                if [ -f "logs/frontend.log" ]; then
-                    tail -25 logs/frontend.log
+                if [ -f "$BASE_DIR/logs/frontend.log" ]; then
+                    tail -25 "$BASE_DIR/logs/frontend.log"
                 else
                     print_warning "No hay logs del frontend"
                 fi
