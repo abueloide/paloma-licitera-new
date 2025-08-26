@@ -83,6 +83,7 @@ def serialize_result(result):
 def construir_url_dof(licitacion: dict) -> str:
     """
     Construye la URL correcta para licitaciones del DOF.
+    Formato: dof.gob.mx/abrirPDF.php?archivo=DDMMYYYY-MAT.pdf&anio=YYYY&repo=
     
     Args:
         licitacion: Diccionario con los datos de la licitación
@@ -91,41 +92,58 @@ def construir_url_dof(licitacion: dict) -> str:
         URL del DOF o la URL original si no se puede construir
     """
     try:
-        # Si ya tiene url_original válida, usarla
+        # Si ya tiene url_original válida del DOF, usarla
         if licitacion.get('url_original') and 'dof.gob.mx' in str(licitacion.get('url_original', '')):
             return licitacion['url_original']
         
-        # Intentar construir la URL del PDF si tenemos la información necesaria
+        # Intentar construir la URL del PDF
         fecha_pub = licitacion.get('fecha_publicacion')
-        datos_orig = licitacion.get('datos_originales', {})
         
-        if fecha_pub and datos_orig:
-            # Si datos_originales es string JSON, parsearlo
-            if isinstance(datos_orig, str):
+        if fecha_pub:
+            # Convertir fecha si es necesario
+            if isinstance(fecha_pub, str):
                 try:
-                    datos_orig = json.loads(datos_orig)
+                    fecha_pub = datetime.strptime(fecha_pub, '%Y-%m-%d')
                 except:
-                    datos_orig = {}
-            
-            # Obtener página si existe
-            pagina = datos_orig.get('pagina', '')
+                    try:
+                        fecha_pub = datetime.strptime(fecha_pub, '%Y-%m-%d %H:%M:%S')
+                    except:
+                        return licitacion.get('url_original', '')
             
             # Determinar si es matutino o vespertino
             # Por defecto asumimos matutino
             edicion = 'MAT'
-            if 'vespertino' in str(licitacion.get('titulo', '')).lower():
+            titulo = str(licitacion.get('titulo', '')).lower()
+            descripcion = str(licitacion.get('descripcion', '')).lower()
+            
+            if 'vespertin' in titulo or 'vespertin' in descripcion:
                 edicion = 'VES'
             
-            # Formatear fecha para URL
-            if isinstance(fecha_pub, (datetime, date)):
-                fecha_str = fecha_pub.strftime('%d/%m/%Y')
+            # Formatear fecha para el archivo: DDMMYYYY
+            fecha_archivo = fecha_pub.strftime('%d%m%Y')
+            año = fecha_pub.strftime('%Y')
+            
+            # Construir URL base del PDF
+            url_base = f"https://dof.gob.mx/abrirPDF.php?archivo={fecha_archivo}-{edicion}.pdf&anio={año}&repo="
+            
+            # Intentar obtener la página si existe en datos_originales
+            datos_orig = licitacion.get('datos_originales', {})
+            if datos_orig:
+                # Si datos_originales es string JSON, parsearlo
+                if isinstance(datos_orig, str):
+                    try:
+                        datos_orig = json.loads(datos_orig)
+                    except:
+                        datos_orig = {}
                 
-                # Construir URL del PDF con página específica
+                # Obtener página si existe
+                pagina = datos_orig.get('pagina', '')
                 if pagina:
-                    return f"https://www.dof.gob.mx/nota_to_pdf.php?fecha={fecha_str}&edicion={edicion}#page={pagina}"
-                else:
-                    # Sin página específica, solo el PDF
-                    return f"https://www.dof.gob.mx/nota_to_pdf.php?fecha={fecha_str}&edicion={edicion}"
+                    # Agregar anchor a la página específica
+                    return f"{url_base}#page={pagina}"
+            
+            return url_base
+            
     except Exception as e:
         logger.error(f"Error construyendo URL DOF: {e}")
     
