@@ -3,16 +3,20 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qsl
 from playwright.async_api import async_playwright
 
-SALIDA = Path("descargas/tianguis_digital")
+# Usar ruta absoluta para guardar en el lugar correcto
+BASE_DIR = Path(__file__).parent.parent.parent.parent  # Subir hasta la raíz del proyecto
+SALIDA = BASE_DIR / "data" / "raw" / "tianguis"
 SALIDA.mkdir(parents=True, exist_ok=True)
+
+print(f">>> Los archivos se guardarán en: {SALIDA.absolute()}")
 
 # Patrones para interceptar las respuestas relevantes
 ENDPOINT_PATTERNS = [
     r"/livewire/message/search-component",
     r"/livewire/download",  # Posible endpoint de descarga
-    r"\\.csv$",
-    r"\\.json$",
-    r"\\.zip$",  # Para detectar ZIPs
+    r"\.csv$",
+    r"\.json$",
+    r"\.zip$",  # Para detectar ZIPs
     r"/export",
     r"/download",
 ]
@@ -106,7 +110,7 @@ async def capturar_respuesta(resp):
                             # Extraer y guardar la URL
                             urls_file = SALIDA / "urls_descarga.txt"
                             with open(urls_file, "a") as f:
-                                f.write(f"{url}\\n")
+                                f.write(f"{url}\n")
                                 
             else:
                 # Para archivos binarios (PDF, Excel, ZIP, etc.)
@@ -174,7 +178,7 @@ async def main(headless: bool = True):
             for selector in [
                 "button:has-text('Descargar todo')",
                 "text=/Descargar.*todo/i",
-                "[wire\\\\:click*='download']",
+                "[wire\\:click*='download']",
                 "button[x-data*='download']",
                 "button:has-text('Descargar')",
                 "[aria-label*='Descargar']"
@@ -204,7 +208,7 @@ async def main(headless: bool = True):
                     "[role='dialog'] button:has-text('CSV')",
                     ".modal button:has-text('CSV')",
                     "[x-show] button:has-text('CSV')",
-                    "[wire\\\\:click*='csv']",
+                    "[wire\\:click*='csv']",
                     "text=/^CSV$/i",  # Texto exacto CSV
                     "button:has-text('CSV')",
                     "a:has-text('CSV')",
@@ -253,7 +257,7 @@ async def main(headless: bool = True):
         await browser.close()
         
         # Buscar y descomprimir cualquier archivo ZIP descargado
-        print("\\n>>> Verificando archivos ZIP descargados...")
+        print("\n>>> Verificando archivos ZIP descargados...")
         zips_encontrados = list(SALIDA.glob("*.zip"))
         if zips_encontrados:
             for archivo_zip in zips_encontrados:
@@ -261,7 +265,13 @@ async def main(headless: bool = True):
         else:
             print("    -> No se encontraron archivos ZIP")
             
-        print(f"\\n>>> Proceso completado. Archivos en: {SALIDA}")
+        print(f"\n>>> Proceso completado. Archivos en: {SALIDA.absolute()}")
+        
+        # Resumen final
+        archivos_guardados = list(SALIDA.glob("*"))
+        print(f">>> Total de archivos guardados: {len(archivos_guardados)}")
+        for archivo in archivos_guardados[-5:]:  # Mostrar últimos 5
+            print(f"    - {archivo.name}")
 
 async def manejar_descarga(download):
     """Maneja descargas directas del navegador"""
