@@ -38,19 +38,34 @@ case $COMMAND in
         lsof -ti:8000 | xargs kill -9 2>/dev/null || true
         lsof -ti:3001 | xargs kill -9 2>/dev/null || true
         
-        # Limpiar instalación anterior
-        [ -d "venv" ] && rm -rf venv
-        [ -d "frontend/node_modules" ] && rm -rf frontend/node_modules
+        # Limpiar instalación anterior si se solicita
+        if [ "$2" == "--clean" ]; then
+            print_warning "Limpiando instalación anterior..."
+            [ -d "venv" ] && rm -rf venv
+            [ -d "frontend/node_modules" ] && rm -rf frontend/node_modules
+        fi
         
         # Crear entorno virtual
         print_status "Creando entorno virtual..."
         python3 -m venv venv
         source venv/bin/activate
         
-        # Instalar backend
+        # Instalar backend - TODAS las dependencias necesarias
         print_status "Instalando dependencias del backend..."
         pip install --upgrade pip
-        pip install fastapi uvicorn[standard] psycopg2-binary sqlalchemy pyyaml pandas python-dotenv httpx beautifulsoup4 lxml requests pymupdf pdfminer.six
+        
+        # Dependencias básicas
+        pip install fastapi uvicorn[standard] psycopg2-binary sqlalchemy pyyaml pandas python-dotenv
+        
+        # Dependencias para scrapers
+        pip install httpx beautifulsoup4 lxml requests selenium playwright
+        
+        # Dependencias para procesamiento de PDFs
+        pip install pymupdf pdfminer.six PyPDF2
+        
+        # Instalar navegadores para playwright
+        print_status "Instalando navegadores para Playwright (necesario para ComprasMX)..."
+        playwright install chromium
         
         # Arreglar bug del frontend
         if grep -q "@/lib/api" frontend/src/components/Dashboard.tsx 2>/dev/null; then
@@ -68,11 +83,20 @@ case $COMMAND in
         if psql -h localhost -U postgres -d paloma_licitera -c "SELECT 1" > /dev/null 2>&1; then
             RECORDS=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT COUNT(*) FROM licitaciones;" 2>/dev/null || echo "0")
             print_status "PostgreSQL conectado - $RECORDS registros encontrados"
+            
+            # Crear tabla si no existe
+            print_status "Verificando estructura de base de datos..."
+            source venv/bin/activate
+            python src/database.py --setup 2>/dev/null || true
         else
             print_error "No se puede conectar a PostgreSQL/paloma_licitera"
-            echo "Asegúrate de que PostgreSQL esté corriendo y la base de datos exista"
+            echo ""
+            echo "Para crear la base de datos, ejecuta:"
+            echo "  psql -U postgres -c 'CREATE DATABASE paloma_licitera;'"
+            echo ""
         fi
         
+        # Crear directorios necesarios
         mkdir -p logs
         mkdir -p data/raw/dof
         mkdir -p data/raw/comprasmx
@@ -158,6 +182,11 @@ case $COMMAND in
         lsof -ti:8000 | xargs kill -9 2>/dev/null && print_status "Backend detenido" || print_warning "Backend no estaba corriendo"
         lsof -ti:3001 | xargs kill -9 2>/dev/null && print_status "Frontend detenido" || print_warning "Frontend no estaba corriendo"
         
+        # También matar procesos de scrapers si están corriendo
+        pkill -f "dof_extraccion" 2>/dev/null || true
+        pkill -f "ComprasMX" 2>/dev/null || true
+        pkill -f "tianguis" 2>/dev/null || true
+        
         echo ""
         print_status "Sistema detenido"
         ;;
@@ -172,11 +201,13 @@ case $COMMAND in
             print_status "PostgreSQL: OK ($RECORDS registros)"
             
             # Estadísticas por fuente
-            echo ""
-            echo "Registros por fuente:"
-            psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT fuente, COUNT(*) FROM licitaciones GROUP BY fuente ORDER BY COUNT(*) DESC;" 2>/dev/null | while IFS='|' read fuente count; do
-                echo "  - $fuente: $count"
-            done
+            if [ "$RECORDS" -gt 0 ]; then
+                echo ""
+                echo "Registros por fuente:"
+                psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT fuente, COUNT(*) FROM licitaciones GROUP BY fuente ORDER BY COUNT(*) DESC;" 2>/dev/null | while IFS='|' read fuente count; do
+                    echo "  - $fuente: $count"
+                done
+            fi
         else
             print_error "PostgreSQL: NO CONECTADO"
         fi
@@ -194,6 +225,14 @@ case $COMMAND in
         else
             print_error "Frontend: DETENIDO"
         fi
+        
+        # Verificar archivos descargados
+        echo ""
+        echo "Archivos de datos:"
+        [ -d "data/raw/dof" ] && DOF_FILES=$(ls data/raw/dof/*.txt 2>/dev/null | wc -l) || DOF_FILES=0
+        [ -d "data/raw/comprasmx" ] && COMPRAS_FILES=$(ls data/raw/comprasmx/*.json 2>/dev/null | wc -l) || COMPRAS_FILES=0
+        echo "  - DOF: $DOF_FILES archivos TXT"
+        echo "  - ComprasMX: $COMPRAS_FILES archivos JSON"
         ;;
         
     download)
@@ -203,34 +242,52 @@ case $COMMAND in
         source venv/bin/activate
         
         echo "Selecciona qué descargar:"
-        echo "1) Todo (ComprasMX, DOF, Tianguis, Sitios Masivos)"
-        echo "2) Solo ComprasMX"
-        echo "3) Solo DOF"
-        echo "4) Solo Tianguis Digital"
-        echo "5) Solo Sitios Masivos"
+        echo "1) Todo (puede tardar 10-20 minutos)"
+        echo "2) Solo procesar archivos existentes (sin descargar)"
+        echo "3) Solo ComprasMX"
+        echo "4) Solo DOF"
+        echo "5) Solo Tianguis Digital"
+        echo "6) Solo Sitios Masivos"
         echo -n "Opción: "
         read option
         
         case $option in
             1)
-                print_info "Descargando TODOS los datos (puede tardar varios minutos)..."
-                python src/etl.py --fuente all
+                print_warning "NOTA: El proceso puede tardar varios minutos y puede parecer congelado."
+                print_warning "Por favor, sé paciente. Presiona Ctrl+C si necesitas cancelar."
+                echo ""
+                print_info "Descargando TODOS los datos..."
+                
+                # Ejecutar con timeout y manejo de errores
+                timeout 1200 python src/etl.py --fuente all 2>&1 | tee logs/etl_download.log
+                
+                if [ ${PIPESTATUS[0]} -eq 124 ]; then
+                    print_error "Timeout: El proceso tardó más de 20 minutos"
+                elif [ ${PIPESTATUS[0]} -ne 0 ]; then
+                    print_warning "El proceso terminó con advertencias. Revisa logs/etl_download.log"
+                else
+                    print_status "Descarga completada"
+                fi
                 ;;
             2)
-                print_info "Descargando ComprasMX..."
-                python src/etl.py --fuente comprasmx
+                print_info "Procesando archivos existentes (sin descargar nuevos)..."
+                python src/etl.py --fuente all --solo-procesamiento
                 ;;
             3)
-                print_info "Descargando DOF..."
-                python src/etl.py --fuente dof
+                print_info "Descargando ComprasMX..."
+                timeout 600 python src/etl.py --fuente comprasmx
                 ;;
             4)
-                print_info "Descargando Tianguis Digital..."
-                python src/etl.py --fuente tianguis
+                print_info "Descargando DOF..."
+                timeout 600 python src/etl.py --fuente dof
                 ;;
             5)
+                print_info "Descargando Tianguis Digital..."
+                timeout 300 python src/etl.py --fuente tianguis
+                ;;
+            6)
                 print_info "Descargando Sitios Masivos..."
-                python src/etl.py --fuente sitios-masivos
+                timeout 600 python src/etl.py --fuente sitios-masivos
                 ;;
             *)
                 print_error "Opción inválida"
@@ -239,8 +296,26 @@ case $COMMAND in
         esac
         
         echo ""
-        print_status "Descarga completada"
         echo "Para ver estadísticas: ./paloma.sh status"
+        ;;
+        
+    download-quick)
+        echo "⚡ DESCARGA RÁPIDA (solo procesamiento)..."
+        echo "-------------------------------------------"
+        
+        source venv/bin/activate
+        
+        print_info "Procesando archivos existentes sin descargar nuevos..."
+        python src/etl.py --fuente all --solo-procesamiento
+        
+        # Procesar DOF con fechas correctas
+        if [ -d "data/raw/dof" ] && [ "$(ls -A data/raw/dof/*.txt 2>/dev/null)" ]; then
+            print_info "Re-procesando archivos del DOF con fechas correctas..."
+            python reprocesar_dof.py
+        fi
+        
+        RECORDS=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT COUNT(*) FROM licitaciones;" 2>/dev/null || echo "0")
+        print_status "Procesamiento completado: $RECORDS registros en la base de datos"
         ;;
         
     reset-db)
@@ -312,7 +387,7 @@ case $COMMAND in
         echo ""
         print_warning "Esto realizará:"
         echo "  1. Limpiar completamente la base de datos"
-        echo "  2. Descargar TODOS los datos nuevamente"
+        echo "  2. Descargar TODOS los datos nuevamente (10-20 min)"
         echo "  3. Procesar e insertar todos los datos"
         echo ""
         echo -n "¿Estás seguro? (escribe 'SI' para confirmar): "
@@ -329,9 +404,16 @@ case $COMMAND in
         print_info "Paso 1/3: Limpiando base de datos..."
         psql -h localhost -U postgres -d paloma_licitera -c "TRUNCATE TABLE licitaciones RESTART IDENTITY;" 2>/dev/null
         
-        # Paso 2: Descargar todos los datos
-        print_info "Paso 2/3: Descargando todos los datos (esto puede tardar)..."
-        python src/etl.py --fuente all
+        # Paso 2: Descargar todos los datos (con timeout de 30 minutos)
+        print_info "Paso 2/3: Descargando todos los datos..."
+        print_warning "NOTA: Este proceso puede tardar 10-20 minutos. Por favor sé paciente."
+        
+        timeout 1800 python src/etl.py --fuente all 2>&1 | tee logs/full_reset.log
+        
+        if [ ${PIPESTATUS[0]} -eq 124 ]; then
+            print_error "Timeout: El proceso tardó más de 30 minutos"
+            echo "Puedes intentar descargar por partes con: ./paloma.sh download"
+        fi
         
         # Paso 3: Procesar archivos del DOF
         if [ -d "data/raw/dof" ] && [ "$(ls -A data/raw/dof/*.txt 2>/dev/null)" ]; then
@@ -347,11 +429,14 @@ case $COMMAND in
         
         TOTAL=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT COUNT(*) FROM licitaciones;" 2>/dev/null || echo "0")
         echo "Total de registros: $TOTAL"
-        echo ""
-        echo "Registros por fuente:"
-        psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT fuente, COUNT(*) FROM licitaciones GROUP BY fuente ORDER BY COUNT(*) DESC;" 2>/dev/null | while IFS='|' read fuente count; do
-            echo "  - $fuente: $count"
-        done
+        
+        if [ "$TOTAL" -gt 0 ]; then
+            echo ""
+            echo "Registros por fuente:"
+            psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT fuente, COUNT(*) FROM licitaciones GROUP BY fuente ORDER BY COUNT(*) DESC;" 2>/dev/null | while IFS='|' read fuente count; do
+                echo "  - $fuente: $count"
+            done
+        fi
         echo "================================"
         ;;
         
@@ -362,8 +447,8 @@ case $COMMAND in
         echo "Selecciona qué logs ver:"
         echo "1) Backend"
         echo "2) Frontend"
-        echo "3) ETL"
-        echo "4) Todos"
+        echo "3) ETL/Descarga"
+        echo "4) Todos los recientes"
         echo -n "Opción: "
         read option
         
@@ -387,17 +472,26 @@ case $COMMAND in
                 fi
                 ;;
             3)
-                echo "Logs del ETL más reciente:"
-                echo "-------------------------"
-                # Buscar logs más recientes del ETL
-                find . -name "*.log" -path "*/etl-process/*" -o -name "*etl*.log" 2>/dev/null | xargs ls -t | head -1 | xargs tail -50
+                if [ -f "$BASE_DIR/logs/etl_download.log" ]; then
+                    echo "Logs de ETL/Descarga (últimas 50 líneas):"
+                    echo "----------------------------------------"
+                    tail -50 "$BASE_DIR/logs/etl_download.log"
+                elif [ -f "$BASE_DIR/logs/full_reset.log" ]; then
+                    echo "Logs de último reset (últimas 50 líneas):"
+                    echo "----------------------------------------"
+                    tail -50 "$BASE_DIR/logs/full_reset.log"
+                else
+                    print_warning "No hay logs de ETL/Descarga"
+                fi
                 ;;
             4)
-                echo "=== BACKEND LOGS ==="
-                [ -f "$BASE_DIR/logs/backend.log" ] && tail -20 "$BASE_DIR/logs/backend.log" || print_warning "No hay logs del backend"
+                echo "=== LOGS RECIENTES ==="
                 echo ""
-                echo "=== FRONTEND LOGS ==="
-                [ -f "$BASE_DIR/logs/frontend.log" ] && tail -20 "$BASE_DIR/logs/frontend.log" || print_warning "No hay logs del frontend"
+                [ -f "$BASE_DIR/logs/backend.log" ] && echo "Backend:" && tail -10 "$BASE_DIR/logs/backend.log"
+                echo ""
+                [ -f "$BASE_DIR/logs/frontend.log" ] && echo "Frontend:" && tail -10 "$BASE_DIR/logs/frontend.log"
+                echo ""
+                [ -f "$BASE_DIR/logs/etl_download.log" ] && echo "ETL:" && tail -10 "$BASE_DIR/logs/etl_download.log"
                 ;;
             *)
                 print_error "Opción inválida"
@@ -406,28 +500,31 @@ case $COMMAND in
         ;;
     
     help|*)
-        echo "Uso: $0 {comando}"
+        echo "Uso: $0 {comando} [opciones]"
         echo ""
         echo "COMANDOS BÁSICOS:"
-        echo "  install      - Instala todas las dependencias"
-        echo "  start        - Inicia backend y frontend"
-        echo "  stop         - Detiene todos los servicios"
-        echo "  status       - Muestra el estado del sistema y estadísticas"
-        echo "  logs         - Muestra los logs del sistema"
+        echo "  install [--clean]  - Instala todas las dependencias (--clean para limpiar antes)"
+        echo "  start             - Inicia backend y frontend"
+        echo "  stop              - Detiene todos los servicios"
+        echo "  status            - Muestra el estado del sistema y estadísticas"
+        echo "  logs              - Muestra los logs del sistema"
         echo ""
         echo "GESTIÓN DE DATOS:"
-        echo "  download     - Descarga datos de las fuentes (ComprasMX, DOF, etc.)"
-        echo "  reset-db     - Limpia la base de datos (elimina todos los registros)"
-        echo "  repopulate   - Re-procesa archivos existentes sin descargar nuevos"
-        echo "  full-reset   - Limpia BD, descarga TODO y repobla desde cero"
+        echo "  download          - Descarga datos de las fuentes (menú interactivo)"
+        echo "  download-quick    - Solo procesa archivos existentes (rápido)"
+        echo "  reset-db          - Limpia la base de datos (elimina todos los registros)"
+        echo "  repopulate        - Re-procesa archivos existentes sin descargar"
+        echo "  full-reset        - Limpia BD, descarga TODO y repobla desde cero"
         echo ""
-        echo "FLUJO TÍPICO:"
-        echo "  1. ./paloma.sh install      # Primera vez"
-        echo "  2. ./paloma.sh download     # Descargar datos"
-        echo "  3. ./paloma.sh start        # Iniciar sistema"
+        echo "FLUJO TÍPICO DE INSTALACIÓN:"
+        echo "  1. ./paloma.sh install       # Primera vez"
+        echo "  2. ./paloma.sh download      # Descargar datos (opción 2 para prueba rápida)"
+        echo "  3. ./paloma.sh start         # Iniciar sistema"
         echo ""
-        echo "RESET COMPLETO:"
-        echo "  ./paloma.sh full-reset      # Borra todo y descarga/procesa de nuevo"
+        echo "SOLUCIÓN DE PROBLEMAS:"
+        echo "  - Si la descarga se cuelga: Ctrl+C y usa download-quick"
+        echo "  - Para reinstalar limpio: ./paloma.sh install --clean"
+        echo "  - Ver logs de errores: ./paloma.sh logs"
         echo ""
         exit 1
         ;;
