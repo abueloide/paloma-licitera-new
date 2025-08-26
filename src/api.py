@@ -17,6 +17,7 @@ from contextlib import contextmanager
 from decimal import Decimal
 import json
 import os
+import re
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -83,7 +84,7 @@ def serialize_result(result):
 def construir_url_dof(licitacion: dict) -> str:
     """
     Construye la URL correcta para licitaciones del DOF.
-    Formato: dof.gob.mx/abrirPDF.php?archivo=DDMMYYYY-MAT.pdf&anio=YYYY&repo=
+    Formato: https://dof.gob.mx/index_111.php?year=YYYY&month=MM&day=DD#gsc.tab=0
     
     Args:
         licitacion: Diccionario con los datos de la licitación
@@ -96,53 +97,67 @@ def construir_url_dof(licitacion: dict) -> str:
         if licitacion.get('url_original') and 'dof.gob.mx' in str(licitacion.get('url_original', '')):
             return licitacion['url_original']
         
-        # Intentar construir la URL del PDF
-        fecha_pub = licitacion.get('fecha_publicacion')
-        
-        if fecha_pub:
-            # Convertir fecha si es necesario
-            if isinstance(fecha_pub, str):
+        # Intentar obtener la fecha del ejemplar desde datos_originales
+        datos_orig = licitacion.get('datos_originales', {})
+        if datos_orig:
+            # Si datos_originales es string JSON, parsearlo
+            if isinstance(datos_orig, str):
                 try:
-                    fecha_pub = datetime.strptime(fecha_pub, '%Y-%m-%d')
+                    datos_orig = json.loads(datos_orig)
                 except:
+                    datos_orig = {}
+        
+        # Buscar fecha del ejemplar del DOF (no la fecha de publicación de la licitación)
+        fecha_ejemplar = None
+        
+        # Primero intentar desde datos_originales
+        if datos_orig:
+            fecha_ejemplar_str = datos_orig.get('fecha_ejemplar', '')
+            if fecha_ejemplar_str:
+                try:
+                    if 'T' in fecha_ejemplar_str:
+                        fecha_ejemplar = datetime.strptime(fecha_ejemplar_str.split('T')[0], '%Y-%m-%d')
+                    else:
+                        fecha_ejemplar = datetime.strptime(fecha_ejemplar_str, '%Y-%m-%d')
+                except:
+                    pass
+        
+        # Si no hay fecha de ejemplar, intentar extraerla del nombre del archivo o URL original
+        if not fecha_ejemplar and licitacion.get('url_original'):
+            # Buscar patrón DDMMYYYY en la URL (ej: 24082025-MAT)
+            match = re.search(r'(\d{2})(\d{2})(\d{4})-(?:MAT|VES)', str(licitacion.get('url_original', '')))
+            if match:
+                dia, mes, año = match.groups()
+                try:
+                    fecha_ejemplar = datetime(int(año), int(mes), int(dia))
+                except:
+                    pass
+        
+        # Si tampoco, usar fecha_publicacion como fallback
+        if not fecha_ejemplar:
+            fecha_pub = licitacion.get('fecha_publicacion')
+            if fecha_pub:
+                if isinstance(fecha_pub, str):
                     try:
-                        fecha_pub = datetime.strptime(fecha_pub, '%Y-%m-%d %H:%M:%S')
+                        fecha_ejemplar = datetime.strptime(fecha_pub, '%Y-%m-%d')
                     except:
-                        return licitacion.get('url_original', '')
+                        try:
+                            fecha_ejemplar = datetime.strptime(fecha_pub, '%Y-%m-%d %H:%M:%S')
+                        except:
+                            return licitacion.get('url_original', '')
+                elif isinstance(fecha_pub, (datetime, date)):
+                    fecha_ejemplar = fecha_pub
+        
+        if fecha_ejemplar:
+            # Formatear para la URL del índice del DOF
+            año = fecha_ejemplar.strftime('%Y')
+            mes = fecha_ejemplar.strftime('%m')
+            dia = fecha_ejemplar.strftime('%d')
             
-            # Determinar si es matutino o vespertino
-            # Por defecto asumimos matutino
-            edicion = 'MAT'
-            titulo = str(licitacion.get('titulo', '')).lower()
-            descripcion = str(licitacion.get('descripcion', '')).lower()
+            # Construir URL del índice del DOF para ese día
+            url = f"https://dof.gob.mx/index_111.php?year={año}&month={mes}&day={dia}#gsc.tab=0"
             
-            if 'vespertin' in titulo or 'vespertin' in descripcion:
-                edicion = 'VES'
-            
-            # Formatear fecha para el archivo: DDMMYYYY
-            fecha_archivo = fecha_pub.strftime('%d%m%Y')
-            año = fecha_pub.strftime('%Y')
-            
-            # Construir URL base del PDF
-            url_base = f"https://dof.gob.mx/abrirPDF.php?archivo={fecha_archivo}-{edicion}.pdf&anio={año}&repo="
-            
-            # Intentar obtener la página si existe en datos_originales
-            datos_orig = licitacion.get('datos_originales', {})
-            if datos_orig:
-                # Si datos_originales es string JSON, parsearlo
-                if isinstance(datos_orig, str):
-                    try:
-                        datos_orig = json.loads(datos_orig)
-                    except:
-                        datos_orig = {}
-                
-                # Obtener página si existe
-                pagina = datos_orig.get('pagina', '')
-                if pagina:
-                    # Agregar anchor a la página específica
-                    return f"{url_base}#page={pagina}"
-            
-            return url_base
+            return url
             
     except Exception as e:
         logger.error(f"Error construyendo URL DOF: {e}")
