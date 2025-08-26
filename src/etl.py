@@ -10,6 +10,7 @@ import yaml
 import subprocess
 import asyncio
 import sys
+import json
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -23,7 +24,6 @@ from extractors.base import BaseExtractor
 from extractors.comprasmx import ComprasMXExtractor
 from extractors.dof import DOFExtractor
 from extractors.tianguis import TianguisExtractor
-from extractors.sitios_masivos import SitiosMasivosExtractor
 from extractors.zip_processor import ZipProcessor
 
 # Configurar logging
@@ -46,6 +46,7 @@ class ETL:
         
         # Rutas de scrapers
         self.scrapers_dir = Path(__file__).parent.parent / "etl-process" / "extractors"
+        self.data_dir = Path(self.config['paths']['data_raw'])
         
     def _inicializar_procesadores(self) -> Dict[str, BaseExtractor]:
         """Inicializar procesadores de archivos (para post-procesamiento)."""
@@ -60,11 +61,6 @@ class ETL:
         if self.config['sources']['tianguis']['enabled']:
             processors['tianguis'] = TianguisExtractor(self.config)
             
-        # Siempre incluir sitios masivos si existe el directorio
-        sitios_masivos_dir = Path(self.config['paths']['data_raw']) / 'sitios-masivos'
-        if sitios_masivos_dir.exists() or True:  # Crear si no existe
-            processors['sitios-masivos'] = SitiosMasivosExtractor(self.config)
-            
         return processors
     
     def ejecutar(self, fuente: str = 'all', solo_procesamiento: bool = False) -> Dict:
@@ -72,7 +68,7 @@ class ETL:
         Ejecutar ETL completo: scraping + procesamiento + carga.
         
         Args:
-            fuente: 'all', 'comprasmx', 'dof', 'tianguis', 'sitios-masivos', 'zip'
+            fuente: 'all', 'comprasmx', 'dof', 'tianguis', 'zip'
             solo_procesamiento: Si True, omite la fase de scraping
         """
         logger.info(f"Iniciando ETL para: {fuente}")
@@ -113,8 +109,7 @@ class ETL:
         # 1. ComprasMX (máxima prioridad) - Portal Federal de Compras
         # 2. DOF (alta prioridad) - Diario Oficial de la Federación  
         # 3. Tianguis Digital (media prioridad) - CDMX
-        # 4. Sitios Masivos (menor prioridad) - Múltiples sitios gubernamentales
-        scrapers = ['comprasmx', 'dof', 'tianguis', 'sitios-masivos']
+        scrapers = ['comprasmx', 'dof', 'tianguis']
         
         for scraper in scrapers:
             if self._scraper_habilitado(scraper):
@@ -126,8 +121,7 @@ class ETL:
         config_map = {
             'comprasmx': self.config['sources']['comprasmx']['enabled'],
             'dof': self.config['sources']['dof']['enabled'],
-            'tianguis': self.config['sources']['tianguis']['enabled'],
-            'sitios-masivos': True  # Siempre habilitado si existe
+            'tianguis': self.config['sources']['tianguis']['enabled']
         }
         return config_map.get(scraper, False)
     
@@ -148,8 +142,6 @@ class ETL:
                 self._ejecutar_dof_scraper(resultado_scraping)
             elif fuente == 'tianguis':
                 self._ejecutar_tianguis_scraper(resultado_scraping)
-            elif fuente == 'sitios-masivos':
-                self._ejecutar_sitios_masivos_scraper(resultado_scraping)
                 
         except Exception as e:
             logger.error(f"Error ejecutando scraper {fuente}: {e}")
@@ -174,7 +166,7 @@ class ETL:
                 resultado['scraping_exitoso'] = True
                 logger.info("✅ Scraper ComprasMX v2 ejecutado exitosamente")
                 # Contar archivos generados
-                data_dir = Path("data/raw/comprasmx")
+                data_dir = self.data_dir / "comprasmx"
                 json_files = list(data_dir.glob("*.json")) if data_dir.exists() else []
                 resultado['archivos_generados'] = len(json_files)
                 logger.info(f"📁 Archivos JSON generados: {len(json_files)}")
@@ -186,11 +178,12 @@ class ETL:
             resultado['error_scraping'] = f"Scraper no encontrado: {scraper_path}"
     
     def _ejecutar_dof_scraper(self, resultado: Dict):
-        """Ejecutar scraper del DOF."""
+        """Ejecutar scraper del DOF - COMPLETO con procesamiento."""
+        # Paso 1: Descargar PDFs
         scraper_path = self.scrapers_dir / "dof" / "dof_extraccion_estructuracion.py"
         
         if scraper_path.exists():
-            logger.info("Ejecutando scraper DOF...")
+            logger.info("📥 Descargando PDFs del DOF...")
             
             process = subprocess.run([
                 sys.executable, str(scraper_path)
@@ -198,19 +191,58 @@ class ETL:
             
             if process.returncode == 0:
                 resultado['scraping_exitoso'] = True
-                logger.info("✅ Scraper DOF ejecutado exitosamente")
+                logger.info("✅ PDFs del DOF descargados")
             else:
-                logger.error(f"❌ Error en scraper DOF: {process.stderr}")
+                logger.error(f"❌ Error descargando DOF: {process.stderr}")
                 resultado['error_scraping'] = process.stderr
+                return
         else:
             logger.warning(f"Scraper no encontrado: {scraper_path}")
+            return
+        
+        # Paso 2: Procesar PDFs a TXT y luego a JSON
+        estructura_path = self.scrapers_dir / "dof" / "estructura_dof.py"
+        
+        if estructura_path.exists():
+            logger.info("🔄 Procesando archivos del DOF (PDF -> TXT -> JSON)...")
+            
+            # Obtener todos los TXTs en el directorio
+            dof_dir = self.data_dir / "dof"
+            txt_files = list(dof_dir.glob("*.txt")) if dof_dir.exists() else []
+            
+            if txt_files:
+                logger.info(f"📝 Procesando {len(txt_files)} archivos TXT...")
+                
+                for txt_file in txt_files:
+                    # Verificar si ya existe el JSON
+                    json_file = txt_file.with_suffix('').with_name(txt_file.stem + '_licitaciones.json')
+                    if not json_file.exists():
+                        logger.info(f"   Procesando: {txt_file.name}")
+                        
+                        process = subprocess.run([
+                            sys.executable, str(estructura_path), str(txt_file)
+                        ], capture_output=True, text=True, cwd=str(estructura_path.parent))
+                        
+                        if process.returncode == 0:
+                            logger.info(f"   ✅ {txt_file.name} procesado")
+                        else:
+                            logger.error(f"   ❌ Error procesando {txt_file.name}")
+                
+                # Contar JSONs generados
+                json_files = list(dof_dir.glob("*_licitaciones.json"))
+                resultado['archivos_generados'] = len(json_files)
+                logger.info(f"📁 JSONs generados: {len(json_files)}")
+            else:
+                logger.warning("No se encontraron archivos TXT para procesar")
+        else:
+            logger.error(f"No se encontró el procesador: {estructura_path}")
     
     def _ejecutar_tianguis_scraper(self, resultado: Dict):
         """Ejecutar scraper de Tianguis Digital."""
         scraper_path = self.scrapers_dir / "tianguis-digital" / "extractor-tianguis.py"
         
         if scraper_path.exists():
-            logger.info("Ejecutando scraper Tianguis Digital...")
+            logger.info("🕷️ Ejecutando scraper Tianguis Digital...")
             
             process = subprocess.run([
                 sys.executable, str(scraper_path)
@@ -219,44 +251,22 @@ class ETL:
             if process.returncode == 0:
                 resultado['scraping_exitoso'] = True
                 logger.info("✅ Scraper Tianguis Digital ejecutado exitosamente")
+                
+                # Contar archivos generados
+                tianguis_dir = self.data_dir / "tianguis"
+                if tianguis_dir.exists():
+                    archivos = list(tianguis_dir.glob("*"))
+                    resultado['archivos_generados'] = len(archivos)
+                    logger.info(f"📁 Archivos generados: {len(archivos)}")
             else:
                 logger.error(f"❌ Error en scraper Tianguis: {process.stderr}")
                 resultado['error_scraping'] = process.stderr
         else:
             logger.warning(f"Scraper no encontrado: {scraper_path}")
     
-    def _ejecutar_sitios_masivos_scraper(self, resultado: Dict):
-        """Ejecutar scrapers de sitios masivos."""
-        # Ejecutar PruebaUnoGPT.py (scraper principal de sitios masivos)
-        scraper_path = self.scrapers_dir / "sitios-masivos" / "PruebaUnoGPT.py"
-        
-        if scraper_path.exists():
-            logger.info("Ejecutando scraper de sitios masivos...")
-            
-            # Crear directorio de salida
-            output_dir = Path("data/raw/sitios-masivos")
-            output_dir.mkdir(parents=True, exist_ok=True)
-            
-            process = subprocess.run([
-                sys.executable, str(scraper_path),
-                "--sources", "all",
-                "--out", str(output_dir / "licitaciones.jsonl"),
-                "--csv", str(output_dir / "licitaciones.csv"),
-                "--json", str(output_dir / "resumen.json")
-            ], capture_output=True, text=True, cwd=str(scraper_path.parent))
-            
-            if process.returncode == 0:
-                resultado['scraping_exitoso'] = True
-                logger.info("✅ Scraper sitios masivos ejecutado exitosamente")
-            else:
-                logger.error(f"❌ Error en scraper sitios masivos: {process.stderr}")
-                resultado['error_scraping'] = process.stderr
-        else:
-            logger.warning(f"Scraper no encontrado: {scraper_path}")
-    
     def _procesar_archivos_generados(self, fuente: str, resultados: Dict):
-        """Procesar archivos generados por los scrapers."""
-        logger.info("📁 Procesando archivos generados por scrapers...")
+        """Procesar archivos generados por los scrapers e insertar en BD."""
+        logger.info("📁 Procesando archivos generados e insertando en BD...")
         
         # Mapear fuentes a procesadores
         fuentes_procesamiento = []
@@ -267,6 +277,7 @@ class ETL:
         
         for nombre_fuente in fuentes_procesamiento:
             if nombre_fuente in self.file_processors:
+                logger.info(f"💾 Procesando e insertando: {nombre_fuente}")
                 resultado_fuente = self._procesar_fuente(nombre_fuente)
                 resultados['fuentes'][f'{nombre_fuente}_procesamiento'] = resultado_fuente
                 resultados['totales']['extraidos'] += resultado_fuente['extraidos']
@@ -274,8 +285,8 @@ class ETL:
                 resultados['totales']['errores'] += resultado_fuente['errores']
     
     def _procesar_fuente(self, nombre_fuente: str) -> Dict:
-        """Procesar una fuente específica."""
-        logger.info(f"Procesando fuente: {nombre_fuente}")
+        """Procesar una fuente específica e insertar en BD."""
+        logger.info(f"🔄 Procesando fuente: {nombre_fuente}")
         extractor = self.file_processors[nombre_fuente]
         
         resultado = {
@@ -288,11 +299,18 @@ class ETL:
             # Extraer datos
             licitaciones = extractor.extraer()
             resultado['extraidos'] = len(licitaciones)
+            logger.info(f"   📊 Extraídas {len(licitaciones)} licitaciones")
             
             # Insertar en BD
             for licitacion in licitaciones:
-                if self.db.insertar_licitacion(licitacion):
-                    resultado['insertados'] += 1
+                try:
+                    if self.db.insertar_licitacion(licitacion):
+                        resultado['insertados'] += 1
+                except Exception as e:
+                    logger.debug(f"Error insertando licitación: {e}")
+                    resultado['errores'] += 1
+            
+            logger.info(f"   💾 Insertadas {resultado['insertados']} licitaciones en BD")
                     
         except Exception as e:
             logger.error(f"Error procesando {nombre_fuente}: {e}")
@@ -342,7 +360,7 @@ def main():
     parser = argparse.ArgumentParser(description='ETL Paloma Licitera')
     parser.add_argument(
         '--fuente',
-        choices=['all', 'comprasmx', 'dof', 'tianguis', 'sitios-masivos', 'zip'],
+        choices=['all', 'comprasmx', 'dof', 'tianguis', 'zip'],
         default='all',
         help='Fuente de datos a procesar'
     )
