@@ -86,14 +86,39 @@ export const apiService = {
     }
   },
 
+  // Top entidad
+  async getTopEntidad() {
+    try {
+      const response = await api.get('/top-entidad');
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.userMessage || error.message);
+    }
+  },
+
+  // Top tipo contratación
+  async getTopTipoContratacion() {
+    try {
+      const response = await api.get('/top-tipo-contratacion');
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.userMessage || error.message);
+    }
+  },
+
   // Licitaciones with filters
   async getLicitaciones(filters: SearchFilters = {}): Promise<LicitacionesResponse> {
     try {
       const params = new URLSearchParams();
       
       Object.entries(filters).forEach(([key, value]) => {
-        if (value !== undefined && value !== null && value !== '') {
-          params.append(key, value.toString());
+        if (value !== undefined && value !== null) {
+          if (Array.isArray(value)) {
+            // For array parameters, add each value separately
+            value.forEach(v => params.append(key, v.toString()));
+          } else if (value !== '') {
+            params.append(key, value.toString());
+          }
         }
       });
 
@@ -171,6 +196,16 @@ export const apiService = {
       const response = await api.get('/analisis/temporal', {
         params: { granularidad }
       });
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.userMessage || error.message);
+    }
+  },
+
+  // Análisis temporal acumulado
+  async getAnalisisTemporalAcumulado() {
+    try {
+      const response = await api.get('/analisis/temporal-acumulado');
       return response.data;
     } catch (error: any) {
       throw new Error(error.userMessage || error.message);
