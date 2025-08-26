@@ -5,8 +5,7 @@ import {
   Statistics as Stats, 
   Filtros, 
   LicitacionesResponse, 
-  AnalisisContratacion as AnalisisPorTipo, 
-  Licitacion 
+  AnalisisContratacion as AnalisisPorTipo
 } from '@/types';
 
 import Header from './dashboard/Header';
@@ -14,7 +13,6 @@ import MetricCards from './dashboard/MetricCards';
 import Filters from './dashboard/Filters';
 import Charts from './dashboard/Charts';
 import DataTable from './dashboard/DataTable';
-import DetailsModal from './dashboard/DetailsModal';
 
 const Dashboard = () => {
   // State
@@ -22,8 +20,6 @@ const Dashboard = () => {
   const [filtros, setFiltros] = useState<Filtros | null>(null);
   const [licitaciones, setLicitaciones] = useState<LicitacionesResponse | null>(null);
   const [tiposData, setTiposData] = useState<AnalisisPorTipo[]>([]);
-  const [selectedLicitacion, setSelectedLicitacion] = useState<Licitacion | null>(null);
-  const [modalOpen, setModalOpen] = useState(false);
   
   // Loading states
   const [statsLoading, setStatsLoading] = useState(true);
@@ -117,25 +113,6 @@ const Dashboard = () => {
     setCurrentPage(page);
   };
 
-  const handleViewDetails = async (licitacion: Licitacion) => {
-    try {
-      const detailed = await apiService.getLicitacionDetail(licitacion.id);
-      setSelectedLicitacion(detailed);
-      setModalOpen(true);
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "No se pudo cargar el detalle de la licitación",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleCloseModal = () => {
-    setModalOpen(false);
-    setSelectedLicitacion(null);
-  };
-
   // Effects
   useEffect(() => {
     fetchStats();
@@ -197,13 +174,6 @@ const Dashboard = () => {
           data={licitaciones}
           loading={licitacionesLoading}
           onPageChange={handlePageChange}
-          onViewDetails={handleViewDetails}
-        />
-        
-        <DetailsModal
-          licitacion={selectedLicitacion}
-          open={modalOpen}
-          onClose={handleCloseModal}
         />
       </div>
     </div>
