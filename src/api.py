@@ -8,7 +8,7 @@ API principal que se conecta a PostgreSQL con los datos reales
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, List, Optional
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import psycopg2
 import psycopg2.extras
 import yaml
@@ -94,8 +94,11 @@ def root():
             "/analisis/por-dependencia",
             "/analisis/por-fuente",
             "/analisis/temporal",
+            "/analisis/temporal-acumulado",
             "/detalle/{id}",
-            "/busqueda-rapida"
+            "/busqueda-rapida",
+            "/top-entidad",
+            "/top-tipo-contratacion"
         ]
     }
 
@@ -138,17 +141,27 @@ def get_statistics():
         """)
         por_tipo_contratacion = cursor.fetchall()
         
-        # Monto total estimado
+        # Top entidad compradora con más licitaciones
         cursor.execute("""
-            SELECT 
-                SUM(monto_estimado) as monto_total,
-                AVG(monto_estimado) as monto_promedio,
-                MAX(monto_estimado) as monto_maximo,
-                MIN(monto_estimado) as monto_minimo
-            FROM licitaciones 
-            WHERE monto_estimado IS NOT NULL AND monto_estimado > 0
+            SELECT entidad_compradora, COUNT(*) as cantidad
+            FROM licitaciones
+            WHERE entidad_compradora IS NOT NULL
+            GROUP BY entidad_compradora
+            ORDER BY cantidad DESC
+            LIMIT 1
         """)
-        montos = cursor.fetchone()
+        top_entidad = cursor.fetchone()
+        
+        # Top tipo de contratación con más licitaciones
+        cursor.execute("""
+            SELECT tipo_contratacion, COUNT(*) as cantidad
+            FROM licitaciones
+            WHERE tipo_contratacion IS NOT NULL
+            GROUP BY tipo_contratacion
+            ORDER BY cantidad DESC
+            LIMIT 1
+        """)
+        top_tipo = cursor.fetchone()
         
         # Últimas actualizaciones
         cursor.execute("""
@@ -163,22 +176,56 @@ def get_statistics():
             'por_fuente': por_fuente,
             'por_estado': por_estado,
             'por_tipo_contratacion': por_tipo_contratacion,
-            'montos': montos,
+            'top_entidad': top_entidad,
+            'top_tipo_contratacion': top_tipo,
             'ultimas_actualizaciones': actualizaciones,
             'fecha_consulta': datetime.now()
         })
+
+@app.get("/top-entidad")
+def get_top_entidad():
+    """Obtener la entidad con más licitaciones."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT entidad_compradora, COUNT(*) as cantidad
+            FROM licitaciones
+            WHERE entidad_compradora IS NOT NULL
+            GROUP BY entidad_compradora
+            ORDER BY cantidad DESC
+            LIMIT 1
+        """)
+        result = cursor.fetchone()
+        return serialize_result(result if result else {"entidad_compradora": "No disponible", "cantidad": 0})
+
+@app.get("/top-tipo-contratacion")
+def get_top_tipo_contratacion():
+    """Obtener el tipo de contratación con más licitaciones."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT tipo_contratacion, COUNT(*) as cantidad
+            FROM licitaciones
+            WHERE tipo_contratacion IS NOT NULL
+            GROUP BY tipo_contratacion
+            ORDER BY cantidad DESC
+            LIMIT 1
+        """)
+        result = cursor.fetchone()
+        return serialize_result(result if result else {"tipo_contratacion": "No disponible", "cantidad": 0})
 
 @app.get("/licitaciones")
 def get_licitaciones(
     fuente: Optional[str] = None,
     estado: Optional[str] = None,
-    tipo_contratacion: Optional[str] = None,
+    tipo_contratacion: Optional[List[str]] = Query(None),
     tipo_procedimiento: Optional[str] = None,
-    entidad_compradora: Optional[str] = None,
+    entidad_compradora: Optional[List[str]] = Query(None),
     fecha_desde: Optional[date] = None,
     fecha_hasta: Optional[date] = None,
     monto_min: Optional[float] = None,
     monto_max: Optional[float] = None,
+    dias_apertura: Optional[int] = None,
     busqueda: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500)
@@ -220,7 +267,7 @@ def get_licitaciones(
         params['estado'] = estado
     
     if tipo_contratacion:
-        sql += " AND tipo_contratacion = %(tipo_contratacion)s"
+        sql += " AND tipo_contratacion = ANY(%(tipo_contratacion)s)"
         params['tipo_contratacion'] = tipo_contratacion
     
     if tipo_procedimiento:
@@ -228,8 +275,8 @@ def get_licitaciones(
         params['tipo_procedimiento'] = tipo_procedimiento
     
     if entidad_compradora:
-        sql += " AND entidad_compradora ILIKE %(entidad_compradora)s"
-        params['entidad_compradora'] = f"%{entidad_compradora}%"
+        sql += " AND entidad_compradora = ANY(%(entidad_compradora)s)"
+        params['entidad_compradora'] = entidad_compradora
     
     if fecha_desde:
         sql += " AND fecha_publicacion >= %(fecha_desde)s"
@@ -246,6 +293,12 @@ def get_licitaciones(
     if monto_max:
         sql += " AND monto_estimado <= %(monto_max)s"
         params['monto_max'] = monto_max
+    
+    if dias_apertura is not None:
+        fecha_limite = date.today() + timedelta(days=dias_apertura)
+        sql += " AND fecha_apertura IS NOT NULL AND fecha_apertura <= %(fecha_limite)s AND fecha_apertura >= %(fecha_hoy)s"
+        params['fecha_limite'] = fecha_limite
+        params['fecha_hoy'] = date.today()
     
     if busqueda:
         sql += """ 
@@ -460,6 +513,39 @@ def analisis_temporal(
         """)
         
         return serialize_result(cursor.fetchall())
+
+@app.get("/analisis/temporal-acumulado")
+def analisis_temporal_acumulado():
+    """Análisis temporal acumulado del año actual."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        
+        # Obtener datos mensuales del año actual
+        cursor.execute("""
+            SELECT 
+                TO_CHAR(fecha_publicacion, 'YYYY-MM') as mes,
+                COUNT(*) as cantidad
+            FROM licitaciones
+            WHERE fecha_publicacion IS NOT NULL
+                AND EXTRACT(YEAR FROM fecha_publicacion) = EXTRACT(YEAR FROM CURRENT_DATE)
+            GROUP BY mes
+            ORDER BY mes
+        """)
+        
+        datos = cursor.fetchall()
+        
+        # Calcular acumulado
+        acumulado = 0
+        resultado = []
+        for row in datos:
+            acumulado += row['cantidad']
+            resultado.append({
+                'mes': row['mes'],
+                'cantidad': row['cantidad'],
+                'acumulado': acumulado
+            })
+        
+        return serialize_result(resultado)
 
 @app.get("/detalle/{licitacion_id}")
 def get_detalle_licitacion(licitacion_id: int):
