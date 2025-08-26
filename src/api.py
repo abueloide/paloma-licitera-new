@@ -219,7 +219,7 @@ def get_licitaciones(
     fuente: Optional[str] = None,
     estado: Optional[str] = None,
     tipo_contratacion: Optional[List[str]] = Query(None),
-    tipo_procedimiento: Optional[str] = None,
+    tipo_procedimiento: Optional[List[str]] = Query(None),
     entidad_compradora: Optional[List[str]] = Query(None),
     fecha_desde: Optional[date] = None,
     fecha_hasta: Optional[date] = None,
@@ -271,7 +271,7 @@ def get_licitaciones(
         params['tipo_contratacion'] = tipo_contratacion
     
     if tipo_procedimiento:
-        sql += " AND tipo_procedimiento = %(tipo_procedimiento)s"
+        sql += " AND tipo_procedimiento = ANY(%(tipo_procedimiento)s)"
         params['tipo_procedimiento'] = tipo_procedimiento
     
     if entidad_compradora:
