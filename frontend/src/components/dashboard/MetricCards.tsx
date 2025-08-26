@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatMoney, formatNumber } from "@/lib/formatters";
+import { formatNumber } from "@/lib/formatters";
 import { Stats } from "@/lib/api";
-import { FileText, DollarSign, Database, TrendingUp } from "lucide-react";
+import { FileText, Building2, Database, Package } from "lucide-react";
 
 interface MetricCardsProps {
   stats: Stats | null;
@@ -17,9 +17,11 @@ const MetricCards = ({ stats, loading }: MetricCardsProps) => {
       color: "text-blue-600",
     },
     {
-      title: "Monto Total",
-      value: stats ? formatMoney(stats.monto_total || 0) : "$0",
-      icon: DollarSign,
+      title: "Entidad con más licitaciones",
+      value: stats?.top_entidad ? 
+        `${stats.top_entidad.entidad_compradora} (${formatNumber(stats.top_entidad.cantidad)})` : 
+        "Cargando...",
+      icon: Building2,
       color: "text-green-600",
     },
     {
@@ -29,9 +31,11 @@ const MetricCards = ({ stats, loading }: MetricCardsProps) => {
       color: "text-purple-600",
     },
     {
-      title: "Monto Promedio",
-      value: stats ? formatMoney(stats.monto_promedio || 0) : "$0",
-      icon: TrendingUp,
+      title: "Tipo más frecuente",
+      value: stats?.top_tipo_contratacion ? 
+        `${stats.top_tipo_contratacion.tipo_contratacion} (${formatNumber(stats.top_tipo_contratacion.cantidad)})` : 
+        "Cargando...",
+      icon: Package,
       color: "text-orange-600",
     },
   ];
@@ -47,11 +51,13 @@ const MetricCards = ({ stats, loading }: MetricCardsProps) => {
             <metric.icon className={`h-5 w-5 ${metric.color}`} />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
+            <div className={`text-${index === 1 || index === 3 ? 'lg' : '2xl'} font-bold`}>
               {loading ? (
                 <div className="h-8 bg-muted animate-pulse rounded"></div>
               ) : (
-                metric.value
+                <div className={index === 1 || index === 3 ? "text-sm" : ""}>
+                  {metric.value}
+                </div>
               )}
             </div>
           </CardContent>
