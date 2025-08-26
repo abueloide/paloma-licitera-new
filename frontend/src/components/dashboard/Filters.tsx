@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Filtros } from "@/lib/api";
+import { Filtros } from "@/types";
 import { Search, RotateCcw } from "lucide-react";
 
 interface FiltersProps {
@@ -20,10 +20,10 @@ interface FiltersProps {
 
 const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
   const [selectedFilters, setSelectedFilters] = useState({
-    fuente: "",
-    tipo_contratacion: "",
-    entidad_compradora: "",
-    estado: "",
+    fuente: "all",
+    tipo_contratacion: "all",
+    entidad_compradora: "all",
+    estado: "all",
     busqueda: "",
   });
 
@@ -31,9 +31,12 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
     const newFilters = { ...selectedFilters, [key]: value };
     setSelectedFilters(newFilters);
     
-    // Convert empty strings to undefined for API
+    // Convert "all" to undefined for API
     const apiFilters = Object.fromEntries(
-      Object.entries(newFilters).map(([k, v]) => [k, v || undefined])
+      Object.entries(newFilters).map(([k, v]) => [
+        k, 
+        v === "all" || v === "" ? undefined : v
+      ])
     );
     
     onFilterChange(apiFilters);
@@ -41,10 +44,10 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
 
   const handleReset = () => {
     const resetFilters = {
-      fuente: "",
-      tipo_contratacion: "",
-      entidad_compradora: "",
-      estado: "",
+      fuente: "all",
+      tipo_contratacion: "all",
+      entidad_compradora: "all",
+      estado: "all",
       busqueda: "",
     };
     setSelectedFilters(resetFilters);
@@ -72,34 +75,35 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
   }
 
   // Helper function to extract values from different data formats
-  const extractOptions = (data: any): string[] => {
+  const extractOptions = (data: any, fieldName: string): string[] => {
     if (!data) return [];
     
     if (Array.isArray(data)) {
       // If it's already an array of strings
       if (typeof data[0] === 'string') {
-        return data;
+        return data.filter(item => item && item !== '');
       }
       // If it's an array of objects, extract the key names
       if (typeof data[0] === 'object' && data[0] !== null) {
-        // Look for common field names
-        const firstObj = data[0];
-        if ('fuente' in firstObj) return data.map((item: any) => item.fuente);
-        if ('tipo_contratacion' in firstObj) return data.map((item: any) => item.tipo_contratacion);
-        if ('entidad_compradora' in firstObj) return data.map((item: any) => item.entidad_compradora);
-        if ('estado' in firstObj) return data.map((item: any) => item.estado);
-        // Fallback: use the first property value
-        return data.map((item: any) => Object.values(item)[0] as string);
+        return data
+          .map((item: any) => {
+            // Look for the field that matches the fieldName
+            if (item[fieldName]) return item[fieldName];
+            // Fallback to the first string field
+            const firstStringValue = Object.values(item).find(v => typeof v === 'string' && v !== '');
+            return firstStringValue;
+          })
+          .filter((item: any) => item && item !== '');
       }
     }
     
     return [];
   };
 
-  const fuentes = extractOptions(filtros.fuentes);
-  const tiposContratacion = extractOptions(filtros.tipos_contratacion);
-  const entidadesCompradoras = extractOptions(filtros.entidades_compradoras);
-  const estados = extractOptions(filtros.estados);
+  const fuentes = extractOptions(filtros.fuentes, 'fuente');
+  const tiposContratacion = extractOptions(filtros.tipos_contratacion, 'tipo_contratacion');
+  const entidadesCompradoras = extractOptions(filtros.top_entidades, 'entidad_compradora');
+  const estados = extractOptions(filtros.estados, 'estado');
 
   return (
     <Card className="card-shadow mb-8">
@@ -119,7 +123,7 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
               <SelectValue placeholder="Fuente" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">Todas las fuentes</SelectItem>
+              <SelectItem value="all">Todas las fuentes</SelectItem>
               {fuentes.map((fuente, index) => (
                 <SelectItem key={`fuente-${index}-${fuente}`} value={fuente}>
                   {fuente}
@@ -136,7 +140,7 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
               <SelectValue placeholder="Tipo" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">Todos los tipos</SelectItem>
+              <SelectItem value="all">Todos los tipos</SelectItem>
               {tiposContratacion.slice(0, 20).map((tipo, index) => (
                 <SelectItem key={`tipo-${index}-${tipo}`} value={tipo}>
                   {tipo}
@@ -153,7 +157,7 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
               <SelectValue placeholder="Entidad" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">Todas las entidades</SelectItem>
+              <SelectItem value="all">Todas las entidades</SelectItem>
               {entidadesCompradoras.slice(0, 50).map((entidad, index) => (
                 <SelectItem key={`entidad-${index}-${entidad}`} value={entidad}>
                   {entidad.length > 30 ? `${entidad.substring(0, 30)}...` : entidad}
@@ -170,7 +174,7 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
               <SelectValue placeholder="Estado" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">Todos los estados</SelectItem>
+              <SelectItem value="all">Todos los estados</SelectItem>
               {estados.map((estado, index) => (
                 <SelectItem key={`estado-${index}-${estado}`} value={estado}>
                   {estado}
