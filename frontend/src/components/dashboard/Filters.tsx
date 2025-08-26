@@ -1,12 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import { Filtros } from "@/types";
-import { Search, RotateCcw, ChevronDown, ChevronUp } from "lucide-react";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Search, RotateCcw } from "lucide-react";
 
 interface FiltersProps {
   filtros: Filtros | null;
@@ -24,8 +21,6 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
   const [selectedEntidades, setSelectedEntidades] = useState<string[]>([]);
   const [diasApertura, setDiasApertura] = useState<string>("");
   const [busqueda, setBusqueda] = useState("");
-  const [showTipos, setShowTipos] = useState(false);
-  const [showEntidades, setShowEntidades] = useState(false);
 
   const extractOptions = (data: any, fieldName: string): Array<{value: string, count: number}> => {
     if (!data) return [];
@@ -50,20 +45,18 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
   const tiposContratacion = extractOptions(filtros?.tipos_contratacion, 'tipo_contratacion');
   const entidadesCompradoras = extractOptions(filtros?.top_entidades, 'entidad_compradora');
 
-  const handleTipoToggle = (tipo: string) => {
-    const newTipos = selectedTipos.includes(tipo)
-      ? selectedTipos.filter(t => t !== tipo)
-      : [...selectedTipos, tipo];
-    setSelectedTipos(newTipos);
-    applyFilters(newTipos, selectedEntidades, diasApertura);
+  const handleTipoChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const selectedOptions = Array.from(e.target.selectedOptions, option => option.value);
+    const filteredOptions = selectedOptions.filter(opt => opt !== 'all');
+    setSelectedTipos(filteredOptions);
+    applyFilters(filteredOptions, selectedEntidades, diasApertura);
   };
 
-  const handleEntidadToggle = (entidad: string) => {
-    const newEntidades = selectedEntidades.includes(entidad)
-      ? selectedEntidades.filter(e => e !== entidad)
-      : [...selectedEntidades, entidad];
-    setSelectedEntidades(newEntidades);
-    applyFilters(selectedTipos, newEntidades, diasApertura);
+  const handleEntidadChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const selectedOptions = Array.from(e.target.selectedOptions, option => option.value);
+    const filteredOptions = selectedOptions.filter(opt => opt !== 'all');
+    setSelectedEntidades(filteredOptions);
+    applyFilters(selectedTipos, filteredOptions, diasApertura);
   };
 
   const handleDiasAperturaChange = (value: string) => {
@@ -138,89 +131,63 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {/* Filtro de Entidades */}
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label>Entidad Compradora</Label>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowEntidades(!showEntidades)}
-              >
-                {showEntidades ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-              </Button>
-            </div>
-            {showEntidades && (
-              <ScrollArea className="h-48 w-full rounded-md border p-4">
-                <div className="space-y-2">
-                  {entidadesCompradoras.slice(0, 30).map((entidad, index) => (
-                    <div key={`entidad-${index}`} className="flex items-center space-x-2">
-                      <Checkbox
-                        id={`entidad-${index}`}
-                        checked={selectedEntidades.includes(entidad.value)}
-                        onCheckedChange={() => handleEntidadToggle(entidad.value)}
-                      />
-                      <Label
-                        htmlFor={`entidad-${index}`}
-                        className="text-sm font-normal cursor-pointer"
-                      >
-                        {entidad.value.length > 40 ? 
-                          `${entidad.value.substring(0, 40)}...` : 
-                          entidad.value} ({entidad.count})
-                      </Label>
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
-            )}
+            <label className="text-sm font-medium">Entidad Compradora</label>
+            <select
+              multiple
+              className="w-full min-h-[100px] p-2 border rounded-md text-sm"
+              value={selectedEntidades}
+              onChange={handleEntidadChange}
+            >
+              <option value="all" disabled className="font-semibold">-- Seleccionar --</option>
+              {entidadesCompradoras.slice(0, 30).map((entidad, index) => (
+                <option key={`entidad-${index}`} value={entidad.value}>
+                  {entidad.value.length > 50 ? 
+                    `${entidad.value.substring(0, 50)}...` : 
+                    entidad.value} ({entidad.count})
+                </option>
+              ))}
+            </select>
             {selectedEntidades.length > 0 && (
               <div className="text-xs text-muted-foreground">
-                {selectedEntidades.length} seleccionadas
+                {selectedEntidades.length} seleccionada(s)
               </div>
             )}
+            <div className="text-xs text-gray-500">
+              Ctrl/Cmd + Click para selección múltiple
+            </div>
           </div>
 
           {/* Filtro de Tipos de Contratación */}
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label>Tipo de Contratación</Label>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowTipos(!showTipos)}
-              >
-                {showTipos ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-              </Button>
-            </div>
-            {showTipos && (
-              <ScrollArea className="h-48 w-full rounded-md border p-4">
-                <div className="space-y-2">
-                  {tiposContratacion.slice(0, 20).map((tipo, index) => (
-                    <div key={`tipo-${index}`} className="flex items-center space-x-2">
-                      <Checkbox
-                        id={`tipo-${index}`}
-                        checked={selectedTipos.includes(tipo.value)}
-                        onCheckedChange={() => handleTipoToggle(tipo.value)}
-                      />
-                      <Label
-                        htmlFor={`tipo-${index}`}
-                        className="text-sm font-normal cursor-pointer"
-                      >
-                        {tipo.value} ({tipo.count})
-                      </Label>
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
-            )}
+            <label className="text-sm font-medium">Tipo de Contratación</label>
+            <select
+              multiple
+              className="w-full min-h-[100px] p-2 border rounded-md text-sm"
+              value={selectedTipos}
+              onChange={handleTipoChange}
+            >
+              <option value="all" disabled className="font-semibold">-- Seleccionar --</option>
+              {tiposContratacion.slice(0, 20).map((tipo, index) => (
+                <option key={`tipo-${index}`} value={tipo.value}>
+                  {tipo.value} ({tipo.count})
+                </option>
+              ))}
+            </select>
             {selectedTipos.length > 0 && (
               <div className="text-xs text-muted-foreground">
-                {selectedTipos.length} seleccionados
+                {selectedTipos.length} seleccionado(s)
               </div>
             )}
+            <div className="text-xs text-gray-500">
+              Ctrl/Cmd + Click para selección múltiple
+            </div>
           </div>
 
           {/* Filtro de Días para Apertura */}
           <div className="space-y-2">
-            <Label htmlFor="dias-apertura">Días para Apertura</Label>
+            <label htmlFor="dias-apertura" className="text-sm font-medium">
+              Días para Apertura
+            </label>
             <Input
               id="dias-apertura"
               type="number"
@@ -229,14 +196,14 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
               onChange={(e) => handleDiasAperturaChange(e.target.value)}
               min="1"
             />
-            <div className="text-xs text-muted-foreground">
+            <div className="text-xs text-gray-500">
               Licitaciones que abren en los próximos X días
             </div>
           </div>
 
           {/* Búsqueda y Reset */}
           <div className="space-y-2">
-            <Label htmlFor="busqueda">Buscar</Label>
+            <label htmlFor="busqueda" className="text-sm font-medium">Buscar</label>
             <Input
               id="busqueda"
               placeholder="Buscar..."
@@ -246,7 +213,7 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
             <Button
               variant="outline"
               onClick={handleReset}
-              className="w-full flex items-center gap-2"
+              className="w-full flex items-center gap-2 mt-2"
             >
               <RotateCcw className="h-4 w-4" />
               Reset
