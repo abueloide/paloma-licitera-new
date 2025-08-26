@@ -253,17 +253,14 @@ case $COMMAND in
         
         case $option in
             1)
-                print_warning "NOTA: El proceso puede tardar varios minutos y puede parecer congelado."
-                print_warning "Por favor, sé paciente. Presiona Ctrl+C si necesitas cancelar."
+                print_warning "NOTA: El proceso puede tardar varios minutos."
+                print_warning "Presiona Ctrl+C si necesitas cancelar."
                 echo ""
                 print_info "Descargando TODOS los datos..."
                 
-                # Ejecutar con timeout y manejo de errores
-                timeout 1200 python src/etl.py --fuente all 2>&1 | tee logs/etl_download.log
+                python src/etl.py --fuente all 2>&1 | tee logs/etl_download.log
                 
-                if [ ${PIPESTATUS[0]} -eq 124 ]; then
-                    print_error "Timeout: El proceso tardó más de 20 minutos"
-                elif [ ${PIPESTATUS[0]} -ne 0 ]; then
+                if [ ${PIPESTATUS[0]} -ne 0 ]; then
                     print_warning "El proceso terminó con advertencias. Revisa logs/etl_download.log"
                 else
                     print_status "Descarga completada"
@@ -272,22 +269,23 @@ case $COMMAND in
             2)
                 print_info "Procesando archivos existentes (sin descargar nuevos)..."
                 python src/etl.py --fuente all --solo-procesamiento
+                print_status "Procesamiento completado"
                 ;;
             3)
                 print_info "Descargando ComprasMX..."
-                timeout 600 python src/etl.py --fuente comprasmx
+                python src/etl.py --fuente comprasmx
                 ;;
             4)
                 print_info "Descargando DOF..."
-                timeout 600 python src/etl.py --fuente dof
+                python src/etl.py --fuente dof
                 ;;
             5)
                 print_info "Descargando Tianguis Digital..."
-                timeout 300 python src/etl.py --fuente tianguis
+                python src/etl.py --fuente tianguis
                 ;;
             6)
                 print_info "Descargando Sitios Masivos..."
-                timeout 600 python src/etl.py --fuente sitios-masivos
+                python src/etl.py --fuente sitios-masivos
                 ;;
             *)
                 print_error "Opción inválida"
@@ -387,7 +385,7 @@ case $COMMAND in
         echo ""
         print_warning "Esto realizará:"
         echo "  1. Limpiar completamente la base de datos"
-        echo "  2. Descargar TODOS los datos nuevamente (10-20 min)"
+        echo "  2. Descargar TODOS los datos nuevamente"
         echo "  3. Procesar e insertar todos los datos"
         echo ""
         echo -n "¿Estás seguro? (escribe 'SI' para confirmar): "
@@ -404,16 +402,11 @@ case $COMMAND in
         print_info "Paso 1/3: Limpiando base de datos..."
         psql -h localhost -U postgres -d paloma_licitera -c "TRUNCATE TABLE licitaciones RESTART IDENTITY;" 2>/dev/null
         
-        # Paso 2: Descargar todos los datos (con timeout de 30 minutos)
+        # Paso 2: Descargar todos los datos
         print_info "Paso 2/3: Descargando todos los datos..."
         print_warning "NOTA: Este proceso puede tardar 10-20 minutos. Por favor sé paciente."
         
-        timeout 1800 python src/etl.py --fuente all 2>&1 | tee logs/full_reset.log
-        
-        if [ ${PIPESTATUS[0]} -eq 124 ]; then
-            print_error "Timeout: El proceso tardó más de 30 minutos"
-            echo "Puedes intentar descargar por partes con: ./paloma.sh download"
-        fi
+        python src/etl.py --fuente all 2>&1 | tee logs/full_reset.log
         
         # Paso 3: Procesar archivos del DOF
         if [ -d "data/raw/dof" ] && [ "$(ls -A data/raw/dof/*.txt 2>/dev/null)" ]; then
