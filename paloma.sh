@@ -85,7 +85,7 @@ setup_postgres() {
                 print_status "Base de datos 'paloma_licitera' ya existe"
             fi
             
-            # Crear tablas
+            # Crear tablas con el esquema CORRECTO
             create_database_tables
             return $?
         else
@@ -122,57 +122,93 @@ setup_postgres() {
     fi
 }
 
-# Función para crear las tablas de la base de datos
+# Función para crear las tablas de la base de datos CON EL ESQUEMA CORRECTO
 create_database_tables() {
     print_info "Verificando estructura de base de datos..."
     
-    # Verificar si la tabla existe
-    if psql -h localhost -U postgres -d paloma_licitera -c "\dt licitaciones" 2>&1 | grep -q "licitaciones"; then
-        RECORDS=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT COUNT(*) FROM licitaciones;" 2>/dev/null || echo "0")
-        print_status "Tabla 'licitaciones' existe con $RECORDS registros"
-        return 0
+    # Verificar si la tabla existe y tiene la estructura correcta
+    TIENE_MONTO_ESTIMADO=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT column_name FROM information_schema.columns WHERE table_name='licitaciones' AND column_name='monto_estimado';" 2>/dev/null || echo "")
+    
+    if [ -z "$TIENE_MONTO_ESTIMADO" ]; then
+        print_warning "Tabla con estructura antigua detectada, actualizando..."
+        
+        # Eliminar tabla vieja si existe
+        psql -h localhost -U postgres -d paloma_licitera -c "DROP TABLE IF EXISTS licitaciones CASCADE;" 2>/dev/null
     fi
     
-    print_info "Creando tabla 'licitaciones'..."
+    print_info "Creando tabla 'licitaciones' con estructura correcta..."
     
-    # Crear tabla principal
-    psql -h localhost -U postgres -d paloma_licitera << EOF
+    # Crear tabla con el esquema CORRECTO que coincide con database.py
+    psql -h localhost -U postgres -d paloma_licitera << 'EOF'
 CREATE TABLE IF NOT EXISTS licitaciones (
     id SERIAL PRIMARY KEY,
-    fuente VARCHAR(50) NOT NULL,
-    fecha_publicacion DATE,
-    fecha_limite DATE,
-    titulo TEXT,
+    
+    -- Campos de identificación
+    numero_procedimiento VARCHAR(255) NOT NULL,
+    uuid_procedimiento VARCHAR(255),
+    hash_contenido VARCHAR(64) UNIQUE,
+    
+    -- Información básica
+    titulo TEXT NOT NULL,
     descripcion TEXT,
+    
+    -- Entidades
     entidad_compradora VARCHAR(500),
-    entidad_convocante VARCHAR(500),
-    tipo_contratacion VARCHAR(100),
-    tipo_licitacion VARCHAR(100),
+    unidad_compradora VARCHAR(500),
+    
+    -- Clasificación
+    tipo_procedimiento VARCHAR(50),
+    tipo_contratacion VARCHAR(50),
     estado VARCHAR(50),
-    monto_minimo DECIMAL(20,2),
-    monto_maximo DECIMAL(20,2),
-    moneda VARCHAR(10),
-    url TEXT,
-    numero_procedimiento VARCHAR(200),
-    fecha_inicio_vigencia DATE,
-    fecha_fin_vigencia DATE,
-    notas TEXT,
-    archivo_origen VARCHAR(200),
+    caracter VARCHAR(50),
+    
+    -- Fechas
+    fecha_publicacion DATE,
+    fecha_apertura DATE,
+    fecha_fallo DATE,
+    fecha_junta_aclaraciones DATE,
+    
+    -- Montos (CAMPO CRÍTICO QUE FALTABA)
+    monto_estimado DECIMAL(15,2),
+    moneda VARCHAR(10) DEFAULT 'MXN',
+    
+    -- Proveedor
+    proveedor_ganador TEXT,
+    
+    -- Metadata
+    fuente VARCHAR(50) NOT NULL,
+    url_original TEXT,
+    fecha_captura TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     datos_originales JSONB,
-    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(fuente, numero_procedimiento)
+    
+    -- Constraints
+    CONSTRAINT uk_licitacion UNIQUE(numero_procedimiento, entidad_compradora, fuente)
 );
 
--- Crear índices
-CREATE INDEX IF NOT EXISTS idx_fuente ON licitaciones(fuente);
-CREATE INDEX IF NOT EXISTS idx_fecha_publicacion ON licitaciones(fecha_publicacion);
+-- Crear índices para búsquedas rápidas
+CREATE INDEX IF NOT EXISTS idx_numero_procedimiento ON licitaciones(numero_procedimiento);
 CREATE INDEX IF NOT EXISTS idx_entidad ON licitaciones(entidad_compradora);
-CREATE INDEX IF NOT EXISTS idx_numero ON licitaciones(numero_procedimiento);
+CREATE INDEX IF NOT EXISTS idx_fecha_pub ON licitaciones(fecha_publicacion);
+CREATE INDEX IF NOT EXISTS idx_fuente ON licitaciones(fuente);
+CREATE INDEX IF NOT EXISTS idx_estado ON licitaciones(estado);
+CREATE INDEX IF NOT EXISTS idx_tipo_procedimiento ON licitaciones(tipo_procedimiento);
+CREATE INDEX IF NOT EXISTS idx_tipo_contratacion ON licitaciones(tipo_contratacion);
+CREATE INDEX IF NOT EXISTS idx_uuid ON licitaciones(uuid_procedimiento);
+CREATE INDEX IF NOT EXISTS idx_hash ON licitaciones(hash_contenido);
 EOF
 
     if [ $? -eq 0 ]; then
         print_status "Estructura de base de datos creada exitosamente"
+        
+        # Verificar que monto_estimado existe
+        VERIFICAR=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT column_name FROM information_schema.columns WHERE table_name='licitaciones' AND column_name='monto_estimado';" 2>/dev/null || echo "")
+        if [ -n "$VERIFICAR" ]; then
+            print_status "✅ Campo 'monto_estimado' verificado correctamente"
+        else
+            print_error "❌ Campo 'monto_estimado' NO se creó correctamente"
+            return 1
+        fi
+        
         return 0
     else
         print_error "Error al crear la estructura de base de datos"
@@ -329,8 +365,15 @@ case $COMMAND in
         # Verificar estado final de PostgreSQL
         echo ""
         if psql -h localhost -U postgres -d paloma_licitera -c "SELECT 1;" > /dev/null 2>&1; then
-            RECORDS=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT COUNT(*) FROM licitaciones;" 2>/dev/null || echo "0")
-            print_status "PostgreSQL conectado - Base de datos lista con $RECORDS registros"
+            # Verificar que la tabla tenga el campo correcto
+            VERIFICAR=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT column_name FROM information_schema.columns WHERE table_name='licitaciones' AND column_name='monto_estimado';" 2>/dev/null || echo "")
+            if [ -n "$VERIFICAR" ]; then
+                RECORDS=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT COUNT(*) FROM licitaciones;" 2>/dev/null || echo "0")
+                print_status "PostgreSQL conectado - Base de datos lista con $RECORDS registros"
+                print_status "✅ Esquema de BD correcto (monto_estimado existe)"
+            else
+                print_warning "⚠️ Esquema de BD incorrecto - ejecuta: ./paloma.sh reset-db"
+            fi
         else
             print_warning "PostgreSQL no está disponible - deberás configurarlo antes de usar el sistema"
             echo "Ejecuta: ./paloma.sh doctor"
@@ -440,6 +483,15 @@ case $COMMAND in
         if psql -h localhost -U postgres -d paloma_licitera -c "SELECT 1" > /dev/null 2>&1; then
             RECORDS=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT COUNT(*) FROM licitaciones;" 2>/dev/null || echo "0")
             print_status "PostgreSQL: OK ($RECORDS registros)"
+            
+            # Verificar esquema
+            VERIFICAR=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT column_name FROM information_schema.columns WHERE table_name='licitaciones' AND column_name='monto_estimado';" 2>/dev/null || echo "")
+            if [ -n "$VERIFICAR" ]; then
+                print_status "Esquema de BD: CORRECTO ✅"
+            else
+                print_error "Esquema de BD: INCORRECTO ❌ (falta monto_estimado)"
+                echo "  Ejecuta: ./paloma.sh reset-db"
+            fi
             
             # Estadísticas por fuente
             if [ "$RECORDS" -gt 0 ]; then
@@ -559,12 +611,6 @@ case $COMMAND in
         print_info "Procesando archivos existentes sin descargar nuevos..."
         python src/etl.py --fuente all --solo-procesamiento
         
-        # Procesar DOF con fechas correctas
-        if [ -d "data/raw/dof" ] && [ "$(ls -A data/raw/dof/*.txt 2>/dev/null)" ]; then
-            print_info "Re-procesando archivos del DOF con fechas correctas..."
-            python reprocesar_dof.py
-        fi
-        
         RECORDS=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT COUNT(*) FROM licitaciones;" 2>/dev/null || echo "0")
         print_status "Procesamiento completado: $RECORDS registros en la base de datos"
         ;;
@@ -581,7 +627,7 @@ case $COMMAND in
         fi
         
         echo ""
-        print_warning "ADVERTENCIA: Esto ELIMINARÁ TODOS los datos de la base de datos"
+        print_warning "ADVERTENCIA: Esto ELIMINARÁ TODOS los datos y recreará la tabla"
         echo -n "¿Estás seguro? (escribe 'SI' para confirmar): "
         read confirmacion
         
@@ -590,125 +636,22 @@ case $COMMAND in
             exit 0
         fi
         
-        print_info "Limpiando base de datos..."
-        psql -h localhost -U postgres -d paloma_licitera -c "TRUNCATE TABLE licitaciones RESTART IDENTITY;" 2>/dev/null
+        print_info "Eliminando tabla antigua..."
+        psql -h localhost -U postgres -d paloma_licitera -c "DROP TABLE IF EXISTS licitaciones CASCADE;" 2>/dev/null
+        
+        print_info "Creando tabla con esquema correcto..."
+        create_database_tables
         
         if [ $? -eq 0 ]; then
-            print_status "Base de datos limpiada"
-        else
-            print_error "Error al limpiar la base de datos"
-            echo "La tabla puede no existir. Ejecuta: ./paloma.sh doctor"
-            exit 1
-        fi
-        ;;
-        
-    repopulate)
-        echo "🔄 REPOBLANDO BASE DE DATOS..."
-        echo "------------------------------"
-        
-        # Verificar PostgreSQL primero
-        if ! psql -h localhost -U postgres -d paloma_licitera -c "SELECT 1;" > /dev/null 2>&1; then
-            print_error "PostgreSQL no está disponible"
-            echo "Ejecuta primero: ./paloma.sh doctor"
-            exit 1
-        fi
-        
-        source venv/bin/activate
-        
-        # Verificar que la base esté vacía o preguntar
-        RECORDS=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT COUNT(*) FROM licitaciones;" 2>/dev/null || echo "0")
-        if [ "$RECORDS" -gt 0 ]; then
-            print_warning "La base de datos tiene $RECORDS registros"
-            echo -n "¿Deseas limpiarla primero? (s/n): "
-            read limpiar
-            
-            if [ "$limpiar" = "s" ]; then
-                print_info "Limpiando base de datos..."
-                psql -h localhost -U postgres -d paloma_licitera -c "TRUNCATE TABLE licitaciones RESTART IDENTITY;" 2>/dev/null
-            fi
-        fi
-        
-        print_info "Procesando archivos existentes (sin descargar nuevos)..."
-        
-        # Re-procesar archivos del DOF con fecha del ejemplar
-        if [ -d "data/raw/dof" ] && [ "$(ls -A data/raw/dof/*.txt 2>/dev/null)" ]; then
-            print_info "Re-procesando archivos del DOF..."
-            python reprocesar_dof.py
-        fi
-        
-        # Ejecutar ETL sin descargar (solo procesamiento)
-        print_info "Ejecutando ETL para procesar archivos existentes..."
-        python src/etl.py --fuente all --solo-procesamiento
-        
-        # Mostrar estadísticas finales
-        FINAL_RECORDS=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT COUNT(*) FROM licitaciones;" 2>/dev/null || echo "0")
-        
-        echo ""
-        print_status "Repoblado completado"
-        echo "Total de registros: $FINAL_RECORDS"
-        ;;
-        
-    full-reset)
-        echo "🔄 RESET COMPLETO Y RECARGA DE DATOS..."
-        echo "---------------------------------------"
-        echo ""
-        print_warning "Esto realizará:"
-        echo "  1. Verificar y arreglar PostgreSQL"
-        echo "  2. Limpiar completamente la base de datos"
-        echo "  3. Descargar TODOS los datos nuevamente"
-        echo "  4. Procesar e insertar todos los datos"
-        echo ""
-        echo -n "¿Estás seguro? (escribe 'SI' para confirmar): "
-        read confirmacion
-        
-        if [ "$confirmacion" != "SI" ]; then
-            print_info "Operación cancelada"
-            exit 0
-        fi
-        
-        # Paso 0: Verificar PostgreSQL
-        print_info "Paso 0/4: Verificando PostgreSQL..."
-        setup_postgres
-        if [ $? -ne 0 ]; then
-            print_error "Debe resolverse el problema con PostgreSQL primero"
-            exit 1
-        fi
-        
-        source venv/bin/activate
-        
-        # Paso 1: Limpiar base de datos
-        print_info "Paso 1/4: Limpiando base de datos..."
-        psql -h localhost -U postgres -d paloma_licitera -c "TRUNCATE TABLE licitaciones RESTART IDENTITY;" 2>/dev/null
-        
-        # Paso 2: Descargar todos los datos
-        print_info "Paso 2/4: Descargando todos los datos..."
-        print_warning "NOTA: Este proceso puede tardar 10-20 minutos. Por favor sé paciente."
-        
-        python src/etl.py --fuente all 2>&1 | tee logs/full_reset.log
-        
-        # Paso 3: Procesar archivos del DOF
-        if [ -d "data/raw/dof" ] && [ "$(ls -A data/raw/dof/*.txt 2>/dev/null)" ]; then
-            print_info "Paso 3/4: Procesando archivos del DOF con fecha del ejemplar..."
-            python reprocesar_dof.py
-        fi
-        
-        # Mostrar estadísticas finales
-        echo ""
-        echo "================================"
-        print_status "RESET COMPLETO FINALIZADO"
-        echo "--------------------------------"
-        
-        TOTAL=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT COUNT(*) FROM licitaciones;" 2>/dev/null || echo "0")
-        echo "Total de registros: $TOTAL"
-        
-        if [ "$TOTAL" -gt 0 ]; then
+            print_status "Base de datos recreada con esquema correcto"
             echo ""
-            echo "Registros por fuente:"
-            psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT fuente, COUNT(*) FROM licitaciones GROUP BY fuente ORDER BY COUNT(*) DESC;" 2>/dev/null | while IFS='|' read fuente count; do
-                echo "  - $fuente: $count"
-            done
+            echo "Ahora puedes ejecutar:"
+            echo "  ./paloma.sh download-quick  # Para procesar archivos existentes"
+            echo "  ./paloma.sh download        # Para descargar nuevos datos"
+        else
+            print_error "Error al recrear la base de datos"
+            exit 1
         fi
-        echo "================================"
         ;;
         
     logs)
@@ -747,10 +690,6 @@ case $COMMAND in
                     echo "Logs de ETL/Descarga (últimas 50 líneas):"
                     echo "----------------------------------------"
                     tail -50 "$BASE_DIR/logs/etl_download.log"
-                elif [ -f "$BASE_DIR/logs/full_reset.log" ]; then
-                    echo "Logs de último reset (últimas 50 líneas):"
-                    echo "----------------------------------------"
-                    tail -50 "$BASE_DIR/logs/full_reset.log"
                 else
                     print_warning "No hay logs de ETL/Descarga"
                 fi
@@ -784,9 +723,7 @@ case $COMMAND in
         echo "GESTIÓN DE DATOS:"
         echo "  download          - Descarga datos de las fuentes"
         echo "  download-quick    - Solo procesa archivos existentes"
-        echo "  reset-db          - Limpia la base de datos"
-        echo "  repopulate        - Re-procesa archivos existentes"
-        echo "  full-reset        - Reset completo y recarga todo"
+        echo "  reset-db          - Elimina y recrea la BD con esquema correcto"
         echo ""
         echo "FLUJO RECOMENDADO PARA INSTALACIÓN:"
         echo "  1. ./paloma.sh install        # Instala todo automáticamente"
@@ -795,6 +732,7 @@ case $COMMAND in
         echo ""
         echo "SI HAY PROBLEMAS:"
         echo "  ./paloma.sh doctor            # Diagnostica y arregla automáticamente"
+        echo "  ./paloma.sh reset-db          # Recrea BD con esquema correcto"
         echo ""
         exit 1
         ;;
