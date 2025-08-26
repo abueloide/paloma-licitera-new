@@ -8,6 +8,9 @@ Este script:
 1. Re-procesa los archivos TXT del DOF con el extractor actualizado
 2. Actualiza la base de datos con las fechas correctas del ejemplar
 3. Corrige las URLs para que apunten al día correcto del DOF
+
+Uso:
+    python reprocesar_dof.py
 """
 
 import os
@@ -53,8 +56,8 @@ def procesar_archivos_txt(directorio_dof):
     """Re-procesar todos los archivos TXT del DOF con el extractor actualizado"""
     logger.info(f"Procesando archivos TXT en: {directorio_dof}")
     
-    # Importar el extractor actualizado
-    from estructura_dof_actualizado import DOFLicitacionesExtractor
+    # Importar el extractor actualizado (ahora es el principal)
+    from estructura_dof import DOFLicitacionesExtractor
     
     archivos_procesados = []
     
@@ -189,6 +192,10 @@ def verificar_urls(cursor):
     
     ejemplos = cursor.fetchall()
     
+    print("\n" + "="*60)
+    print("EJEMPLOS DE URLs CORREGIDAS")
+    print("="*60)
+    
     for ejemplo in ejemplos:
         datos_orig = ejemplo['datos_originales']
         if isinstance(datos_orig, str):
@@ -204,10 +211,10 @@ def verificar_urls(cursor):
                 año, mes, dia = fecha_parts
                 url_correcta = f"https://dof.gob.mx/index_111.php?year={año}&month={mes}&day={dia}#gsc.tab=0"
                 
-                logger.info(f"📎 Licitación {ejemplo['numero_procedimiento']}")
-                logger.info(f"   Fecha ejemplar: {fecha_ejemplar} - Edición: {edicion}")
-                logger.info(f"   URL DOF: {url_correcta}")
-                print()
+                print(f"\n📎 Licitación: {ejemplo['numero_procedimiento']}")
+                print(f"   Entidad: {ejemplo['entidad_compradora']}")
+                print(f"   Fecha ejemplar: {fecha_ejemplar} - Edición: {edicion}")
+                print(f"   URL DOF: {url_correcta}")
 
 def main():
     """Función principal"""
@@ -240,19 +247,20 @@ def main():
     actualizaciones = actualizar_base_datos(archivos_procesados, db_config)
     
     # Resumen final
-    logger.info("\n" + "="*60)
-    logger.info("RESUMEN DEL PROCESO")
-    logger.info("="*60)
-    logger.info(f"📁 Archivos procesados: {len(archivos_procesados)}")
-    logger.info(f"💾 Registros actualizados: {actualizaciones}")
+    print("\n" + "="*60)
+    print("RESUMEN DEL PROCESO")
+    print("="*60)
+    print(f"📁 Archivos procesados: {len(archivos_procesados)}")
+    print(f"💾 Registros actualizados: {actualizaciones}")
     
     print("\nArchivos procesados:")
     for archivo in archivos_procesados:
         print(f"  - {archivo['archivo']}: {archivo['licitaciones']} licitaciones")
         print(f"    Fecha: {archivo['fecha_ejemplar']} - Edición: {archivo['edicion']}")
     
-    logger.info("\n✅ Proceso completado. Las URLs del DOF ahora apuntan a las fechas correctas del ejemplar.")
-    logger.info("📌 La API ya puede construir URLs correctas usando la información de datos_originales")
+    print("\n✅ Proceso completado exitosamente")
+    print("📌 Las URLs del DOF ahora apuntan a las fechas correctas del ejemplar")
+    print("📌 La API construirá URLs correctas usando datos_originales->fecha_ejemplar")
     
     return 0
 
