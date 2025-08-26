@@ -26,112 +26,114 @@ print_info() { echo -e "${BLUE}ℹ️  $1${NC}"; }
 BASE_DIR=$(pwd)
 
 # =================================================================
-# FUNCIÓN DE DIAGNÓSTICO Y VERIFICACIÓN DE POSTGRESQL
+# FUNCIÓN PARA INSTALAR Y CONFIGURAR POSTGRESQL
 # =================================================================
-check_and_fix_postgres() {
-    echo "🔍 Verificando PostgreSQL..."
+setup_postgres() {
+    echo "🔧 Configurando PostgreSQL..."
     
-    # Verificar si PostgreSQL está corriendo
-    if psql -h localhost -U postgres -d postgres -c "SELECT 1;" > /dev/null 2>&1; then
-        print_status "PostgreSQL está corriendo"
+    # Detectar sistema operativo
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS
+        print_info "Sistema detectado: macOS"
         
-        # Verificar si la base de datos existe
-        if psql -h localhost -U postgres -lqt | cut -d \| -f 1 | grep -qw paloma_licitera; then
-            print_status "Base de datos 'paloma_licitera' existe"
-            
-            # Verificar tabla
-            if psql -h localhost -U postgres -d paloma_licitera -c "SELECT 1 FROM licitaciones LIMIT 1;" > /dev/null 2>&1; then
-                RECORDS=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT COUNT(*) FROM licitaciones;" 2>/dev/null || echo "0")
-                print_status "Tabla 'licitaciones' existe con $RECORDS registros"
-                return 0
-            else
-                print_warning "Tabla 'licitaciones' no existe, creándola..."
-                create_database_tables
-                return $?
-            fi
+        # Verificar si Homebrew está instalado
+        if ! command -v brew &> /dev/null; then
+            print_error "Homebrew no está instalado"
+            echo "Instala Homebrew primero: https://brew.sh"
+            return 1
+        fi
+        
+        # Verificar si PostgreSQL está instalado
+        if brew list postgresql@14 &>/dev/null || brew list postgresql &>/dev/null; then
+            print_status "PostgreSQL ya está instalado"
         else
-            print_warning "Base de datos 'paloma_licitera' no existe"
-            echo -n "¿Deseas crearla? (s/n): "
-            read respuesta
-            if [ "$respuesta" = "s" ]; then
-                print_info "Creando base de datos..."
+            print_info "Instalando PostgreSQL..."
+            brew install postgresql@14
+            if [ $? -ne 0 ]; then
+                print_error "Error instalando PostgreSQL"
+                return 1
+            fi
+            print_status "PostgreSQL instalado"
+        fi
+        
+        # Iniciar PostgreSQL si no está corriendo
+        if ! psql -h localhost -U postgres -d postgres -c "SELECT 1;" > /dev/null 2>&1; then
+            print_info "Iniciando PostgreSQL..."
+            brew services start postgresql@14 2>/dev/null || brew services start postgresql 2>/dev/null
+            
+            # Esperar a que inicie
+            sleep 3
+            
+            # Crear usuario postgres si no existe
+            createuser -s postgres 2>/dev/null || true
+        fi
+        
+        # Verificar nuevamente
+        if psql -h localhost -U postgres -d postgres -c "SELECT 1;" > /dev/null 2>&1; then
+            print_status "PostgreSQL está funcionando"
+            
+            # Crear base de datos si no existe
+            if ! psql -h localhost -U postgres -lqt | cut -d \| -f 1 | grep -qw paloma_licitera; then
+                print_info "Creando base de datos 'paloma_licitera'..."
                 psql -h localhost -U postgres -c "CREATE DATABASE paloma_licitera;" 2>/dev/null
                 if [ $? -eq 0 ]; then
                     print_status "Base de datos creada"
-                    create_database_tables
-                    return $?
                 else
-                    print_error "No se pudo crear la base de datos"
-                    return 1
+                    print_warning "La base de datos ya existe o hubo un error menor"
                 fi
             else
-                return 1
+                print_status "Base de datos 'paloma_licitera' ya existe"
             fi
+            
+            # Crear tablas
+            create_database_tables
+            return $?
+        else
+            print_error "PostgreSQL no pudo iniciarse"
+            echo "Intenta ejecutar manualmente:"
+            echo "  brew services restart postgresql@14"
+            return 1
+        fi
+        
+    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        # Linux
+        print_info "Sistema detectado: Linux"
+        
+        # Verificar si PostgreSQL está instalado
+        if command -v psql &> /dev/null; then
+            print_status "PostgreSQL está instalado"
+            
+            # Intentar iniciar si no está corriendo
+            if ! psql -h localhost -U postgres -d postgres -c "SELECT 1;" > /dev/null 2>&1; then
+                print_info "Iniciando PostgreSQL..."
+                sudo systemctl start postgresql 2>/dev/null || sudo service postgresql start 2>/dev/null
+                sleep 3
+            fi
+        else
+            print_warning "PostgreSQL no está instalado"
+            echo "Instala PostgreSQL con:"
+            echo "  Ubuntu/Debian: sudo apt-get install postgresql postgresql-contrib"
+            echo "  Fedora/RedHat: sudo dnf install postgresql postgresql-server"
+            return 1
         fi
     else
-        print_error "PostgreSQL no está corriendo o no está instalado"
-        
-        # Detectar sistema operativo
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            # macOS
-            print_info "Detectado: macOS"
-            
-            # Verificar si está instalado con Homebrew
-            if command -v brew &> /dev/null; then
-                if brew list postgresql@14 &>/dev/null || brew list postgresql &>/dev/null; then
-                    print_info "PostgreSQL está instalado, intentando iniciar..."
-                    
-                    # Intentar iniciar PostgreSQL
-                    brew services start postgresql@14 2>/dev/null || brew services start postgresql 2>/dev/null
-                    
-                    sleep 3
-                    
-                    # Verificar de nuevo
-                    if psql -h localhost -U postgres -d postgres -c "SELECT 1;" > /dev/null 2>&1; then
-                        print_status "PostgreSQL iniciado exitosamente"
-                        return check_and_fix_postgres
-                    else
-                        print_error "No se pudo iniciar PostgreSQL"
-                        print_info "Intenta ejecutar manualmente:"
-                        echo "  brew services restart postgresql@14"
-                        return 1
-                    fi
-                else
-                    print_warning "PostgreSQL no está instalado"
-                    echo -n "¿Deseas instalarlo con Homebrew? (s/n): "
-                    read respuesta
-                    if [ "$respuesta" = "s" ]; then
-                        brew install postgresql@14
-                        brew services start postgresql@14
-                        createuser -s postgres 2>/dev/null || true
-                        sleep 3
-                        return check_and_fix_postgres
-                    else
-                        return 1
-                    fi
-                fi
-            else
-                print_error "Homebrew no está instalado"
-                echo "Instala PostgreSQL manualmente o instala Homebrew primero"
-                return 1
-            fi
-        elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-            # Linux
-            print_info "Detectado: Linux"
-            print_info "Intenta iniciar PostgreSQL con:"
-            echo "  sudo systemctl start postgresql"
-            echo "  sudo service postgresql start"
-            return 1
-        else
-            print_error "Sistema operativo no soportado automáticamente"
-            return 1
-        fi
+        print_error "Sistema operativo no soportado para instalación automática"
+        return 1
     fi
 }
 
 # Función para crear las tablas de la base de datos
 create_database_tables() {
-    print_info "Creando estructura de base de datos..."
+    print_info "Verificando estructura de base de datos..."
+    
+    # Verificar si la tabla existe
+    if psql -h localhost -U postgres -d paloma_licitera -c "\dt licitaciones" 2>&1 | grep -q "licitaciones"; then
+        RECORDS=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT COUNT(*) FROM licitaciones;" 2>/dev/null || echo "0")
+        print_status "Tabla 'licitaciones' existe con $RECORDS registros"
+        return 0
+    fi
+    
+    print_info "Creando tabla 'licitaciones'..."
     
     # Crear tabla principal
     psql -h localhost -U postgres -d paloma_licitera << EOF
@@ -191,8 +193,8 @@ case $COMMAND in
         echo "--------------------------"
         echo ""
         
-        # Verificar PostgreSQL
-        check_and_fix_postgres
+        # Verificar e instalar PostgreSQL si es necesario
+        setup_postgres
         PG_STATUS=$?
         
         echo ""
@@ -203,9 +205,9 @@ case $COMMAND in
             source venv/bin/activate
             
             # Verificar dependencias críticas
-            python -c "import fastapi, psycopg2, playwright" 2>/dev/null
+            python -c "import fastapi, psycopg2" 2>/dev/null
             if [ $? -eq 0 ]; then
-                print_status "Dependencias Python instaladas"
+                print_status "Dependencias Python básicas instaladas"
             else
                 print_warning "Faltan algunas dependencias"
                 echo "  Ejecuta: ./paloma.sh install"
@@ -264,13 +266,11 @@ case $COMMAND in
         echo "📦 INSTALANDO SISTEMA..."
         echo "------------------------"
         
-        # Primero verificar PostgreSQL
+        # Configurar PostgreSQL (instalar si no existe, iniciar si está detenido, crear BD)
         echo ""
-        check_and_fix_postgres
+        setup_postgres
         if [ $? -ne 0 ]; then
-            print_error "PostgreSQL debe estar funcionando para continuar"
-            echo "Resuelve los problemas de PostgreSQL primero"
-            exit 1
+            print_warning "PostgreSQL tuvo problemas pero continuaremos con la instalación"
         fi
         
         # Limpiar procesos
@@ -286,7 +286,7 @@ case $COMMAND in
         fi
         
         # Crear entorno virtual
-        print_status "Creando entorno virtual..."
+        print_status "Creando entorno virtual Python..."
         python3 -m venv venv
         source venv/bin/activate
         
@@ -326,12 +326,23 @@ case $COMMAND in
         mkdir -p data/raw/tianguis
         mkdir -p data/processed
         
+        # Verificar estado final de PostgreSQL
+        echo ""
+        if psql -h localhost -U postgres -d paloma_licitera -c "SELECT 1;" > /dev/null 2>&1; then
+            RECORDS=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT COUNT(*) FROM licitaciones;" 2>/dev/null || echo "0")
+            print_status "PostgreSQL conectado - Base de datos lista con $RECORDS registros"
+        else
+            print_warning "PostgreSQL no está disponible - deberás configurarlo antes de usar el sistema"
+            echo "Ejecuta: ./paloma.sh doctor"
+        fi
+        
         echo ""
         print_status "INSTALACIÓN COMPLETADA"
         echo ""
-        echo "Para verificar el sistema: ./paloma.sh doctor"
-        echo "Para descargar datos: ./paloma.sh download"
-        echo "Para iniciar: ./paloma.sh start"
+        echo "Próximos pasos:"
+        echo "  1. ./paloma.sh doctor          # Verificar que todo esté bien"
+        echo "  2. ./paloma.sh download        # Descargar datos"
+        echo "  3. ./paloma.sh start           # Iniciar sistema"
         echo ""
         ;;
         
@@ -657,7 +668,7 @@ case $COMMAND in
         
         # Paso 0: Verificar PostgreSQL
         print_info "Paso 0/4: Verificando PostgreSQL..."
-        check_and_fix_postgres
+        setup_postgres
         if [ $? -ne 0 ]; then
             print_error "Debe resolverse el problema con PostgreSQL primero"
             exit 1
@@ -777,14 +788,13 @@ case $COMMAND in
         echo "  repopulate        - Re-procesa archivos existentes"
         echo "  full-reset        - Reset completo y recarga todo"
         echo ""
-        echo "FLUJO RECOMENDADO:"
-        echo "  1. ./paloma.sh doctor         # Verificar sistema"
-        echo "  2. ./paloma.sh install        # Si es primera vez"
-        echo "  3. ./paloma.sh download       # Descargar datos"
-        echo "  4. ./paloma.sh start          # Iniciar sistema"
+        echo "FLUJO RECOMENDADO PARA INSTALACIÓN:"
+        echo "  1. ./paloma.sh install        # Instala todo automáticamente"
+        echo "  2. ./paloma.sh download       # Descarga datos"
+        echo "  3. ./paloma.sh start          # Inicia sistema"
         echo ""
         echo "SI HAY PROBLEMAS:"
-        echo "  ./paloma.sh doctor            # Diagnosticar y arreglar"
+        echo "  ./paloma.sh doctor            # Diagnostica y arregla automáticamente"
         echo ""
         exit 1
         ;;
