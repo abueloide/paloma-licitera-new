@@ -14,6 +14,11 @@ Proceso:
 3. Extrae el contenido entre las páginas de inicio y fin
 4. Parsea la información de cada licitación
 5. Genera un archivo JSON estructurado
+
+ACTUALIZACIÓN 26/08/2025: 
+- Ahora extrae la fecha del ejemplar del nombre del archivo
+- Guarda fecha_ejemplar, edicion_ejemplar y archivo_origen en el JSON
+- Esto permite construir URLs correctas al DOF
 """
 
 import os
@@ -61,6 +66,11 @@ class Licitacion:
     pagina: int
     referencia: str  # (R.- XXXXXX)
     raw_text: str  # Texto original para debugging
+    
+    # Información del ejemplar del DOF
+    fecha_ejemplar: str  # Fecha del ejemplar del DOF (YYYY-MM-DD)
+    edicion_ejemplar: str  # MAT o VES
+    archivo_origen: str  # Nombre del archivo del que proviene
 
 
 class DOFLicitacionesExtractor:
@@ -78,6 +88,9 @@ class DOFLicitacionesExtractor:
         self.paginas = {}
         self.licitaciones = []
         
+        # Extraer información del ejemplar del nombre del archivo
+        self.fecha_ejemplar, self.edicion_ejemplar = self._extraer_info_ejemplar()
+        
         # Patrones regex actualizados para el formato real del DOF
         self.patron_pagina = re.compile(r"===== \[PÁGINA (\d+)\] =====")
         self.patron_indice_convocatorias = re.compile(
@@ -88,13 +101,37 @@ class DOFLicitacionesExtractor:
             r"AVISOS[\s\n]+.*?[\.\s]+(\d+)",
             re.IGNORECASE | re.DOTALL
         )
+    
+    def _extraer_info_ejemplar(self) -> Tuple[str, str]:
+        """
+        Extrae la fecha y edición del ejemplar del nombre del archivo.
         
+        Returns:
+            Tupla (fecha_ejemplar, edicion) en formato (YYYY-MM-DD, MAT/VES)
+        """
+        nombre_archivo = os.path.basename(self.archivo_txt)
+        
+        # Buscar patrón DDMMYYYY_EDICION en el nombre del archivo
+        # Ejemplos: 01082025_MAT.txt, 31082025_VES.txt
+        match = re.search(r'(\d{2})(\d{2})(\d{4})_(MAT|VES)', nombre_archivo)
+        
+        if match:
+            dia, mes, año, edicion = match.groups()
+            fecha_ejemplar = f"{año}-{mes}-{dia}"
+            logger.info(f"Fecha del ejemplar extraída: {fecha_ejemplar} - Edición: {edicion}")
+            return fecha_ejemplar, edicion
+        else:
+            logger.warning(f"No se pudo extraer fecha del ejemplar del archivo: {nombre_archivo}")
+            return "", ""
+    
     def cargar_archivo(self) -> bool:
         """Carga el archivo TXT en memoria"""
         try:
             with open(self.archivo_txt, 'r', encoding='utf-8') as f:
                 self.contenido = f.read()
             logger.info(f"Archivo cargado: {len(self.contenido)} caracteres")
+            if self.fecha_ejemplar:
+                logger.info(f"📅 Ejemplar del DOF: {self.fecha_ejemplar} - Edición: {self.edicion_ejemplar}")
             return True
         except Exception as e:
             logger.error(f"Error al cargar archivo: {e}")
@@ -165,7 +202,7 @@ class DOFLicitacionesExtractor:
         Returns:
             Objeto Licitacion o None si no se puede extraer
         """
-        # Inicializar datos
+        # Inicializar datos con información del ejemplar
         datos = {
             'numero_licitacion': '',
             'caracter_licitacion': '',
@@ -185,7 +222,11 @@ class DOFLicitacionesExtractor:
             'observaciones': '',
             'pagina': num_pagina,
             'referencia': '',
-            'raw_text': texto[:500]
+            'raw_text': texto[:500],
+            # Información del ejemplar
+            'fecha_ejemplar': self.fecha_ejemplar,
+            'edicion_ejemplar': self.edicion_ejemplar,
+            'archivo_origen': os.path.basename(self.archivo_txt)
         }
         
         # Patrones mejorados basados en el formato real
@@ -341,6 +382,8 @@ class DOFLicitacionesExtractor:
         """
         datos_json = {
             'archivo_origen': os.path.basename(self.archivo_txt),
+            'fecha_ejemplar': self.fecha_ejemplar,
+            'edicion_ejemplar': self.edicion_ejemplar,
             'fecha_extraccion': datetime.now().isoformat(),
             'total_licitaciones': len(self.licitaciones),
             'licitaciones': [asdict(lic) for lic in self.licitaciones]
@@ -350,6 +393,8 @@ class DOFLicitacionesExtractor:
             json.dump(datos_json, f, ensure_ascii=False, indent=2)
         
         logger.info(f"Datos guardados en: {archivo_salida}")
+        if self.fecha_ejemplar:
+            logger.info(f"📅 Fecha del ejemplar DOF: {self.fecha_ejemplar} - Edición: {self.edicion_ejemplar}")
         
         # Generar resumen
         self.generar_resumen()
@@ -363,6 +408,8 @@ class DOFLicitacionesExtractor:
         print("\n" + "="*80)
         print("RESUMEN DE LICITACIONES EXTRAÍDAS")
         print("="*80)
+        if self.fecha_ejemplar:
+            print(f"📅 Ejemplar del DOF: {self.fecha_ejemplar} - Edición: {self.edicion_ejemplar}")
         
         # Agrupar por dependencia
         dependencias = {}
@@ -437,7 +484,7 @@ def procesar_multiples_archivos(directorio: str = None):
     if directorio is None:
         directorio = os.path.dirname(os.path.abspath(__file__))
     
-    archivos_txt = [f for f in os.listdir(directorio) if f.endswith('.txt') and 'MAT' in f]
+    archivos_txt = [f for f in os.listdir(directorio) if f.endswith('.txt') and ('MAT' in f or 'VES' in f)]
     
     if not archivos_txt:
         print(f"No se encontraron archivos TXT del DOF en {directorio}")
@@ -455,12 +502,16 @@ def procesar_multiples_archivos(directorio: str = None):
             resultados.append({
                 'archivo': archivo,
                 'licitaciones': len(extractor.licitaciones),
+                'fecha_ejemplar': extractor.fecha_ejemplar,
+                'edicion': extractor.edicion_ejemplar,
                 'status': 'OK'
             })
         else:
             resultados.append({
                 'archivo': archivo,
                 'licitaciones': 0,
+                'fecha_ejemplar': extractor.fecha_ejemplar,
+                'edicion': extractor.edicion_ejemplar,
                 'status': 'ERROR'
             })
     
@@ -479,7 +530,8 @@ def procesar_multiples_archivos(directorio: str = None):
     print("\nDetalle por archivo:")
     for r in resultados:
         estado = "✅" if r['status'] == 'OK' else "❌"
-        print(f"  {estado} {r['archivo']}: {r['licitaciones']} licitaciones")
+        fecha_info = f" - Ejemplar: {r['fecha_ejemplar']} {r['edicion']}" if r['fecha_ejemplar'] else ""
+        print(f"  {estado} {r['archivo']}: {r['licitaciones']} licitaciones{fecha_info}")
 
 
 def main():
@@ -509,6 +561,8 @@ def main():
         if extractor.procesar():
             print(f"\n✅ Proceso completado exitosamente")
             print(f"Total de licitaciones extraídas: {len(extractor.licitaciones)}")
+            if extractor.fecha_ejemplar:
+                print(f"📅 Ejemplar del DOF: {extractor.fecha_ejemplar} - Edición: {extractor.edicion_ejemplar}")
             
             # Mostrar algunas licitaciones de ejemplo
             if extractor.licitaciones:
@@ -522,6 +576,8 @@ def main():
                         print(f"   Subdependencia: {lic.subdependencia}")
                     print(f"   Objeto: {lic.objeto_licitacion[:100]}...")
                     print(f"   Página: {lic.pagina}")
+                    print(f"   Fecha Ejemplar DOF: {lic.fecha_ejemplar}")
+                    print(f"   Edición: {lic.edicion_ejemplar}")
                     if lic.referencia:
                         print(f"   Referencia: {lic.referencia}")
         else:
