@@ -3,7 +3,6 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { ArrowLeft, ExternalLink, Download, Calendar, Building, FileText } from "lucide-react";
 import { apiService } from '@/services/api';
 
@@ -142,7 +141,7 @@ const LicitacionDetail = () => {
             </div>
           )}
 
-          <Separator className="my-6" />
+          <hr className="my-6 border-t" />
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-4">
@@ -237,7 +236,7 @@ const LicitacionDetail = () => {
             </div>
           </div>
 
-          <Separator className="my-6" />
+          <hr className="my-6 border-t" />
 
           <div className="flex gap-4">
             {licitacion.url_original && (
@@ -261,7 +260,7 @@ const LicitacionDetail = () => {
 
           {licitacion.metadata && Object.keys(licitacion.metadata).length > 0 && (
             <>
-              <Separator className="my-6" />
+              <hr className="my-6 border-t" />
               <div>
                 <h3 className="font-semibold mb-2">Información Adicional</h3>
                 <div className="bg-muted p-4 rounded-lg">
