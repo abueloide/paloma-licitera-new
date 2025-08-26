@@ -80,6 +80,72 @@ def serialize_result(result):
         }
     return result
 
+def construir_url_dof(licitacion: dict) -> str:
+    """
+    Construye la URL correcta para licitaciones del DOF.
+    
+    Args:
+        licitacion: Diccionario con los datos de la licitación
+        
+    Returns:
+        URL del DOF o la URL original si no se puede construir
+    """
+    try:
+        # Si ya tiene url_original válida, usarla
+        if licitacion.get('url_original') and 'dof.gob.mx' in str(licitacion.get('url_original', '')):
+            return licitacion['url_original']
+        
+        # Intentar construir la URL del PDF si tenemos la información necesaria
+        fecha_pub = licitacion.get('fecha_publicacion')
+        datos_orig = licitacion.get('datos_originales', {})
+        
+        if fecha_pub and datos_orig:
+            # Si datos_originales es string JSON, parsearlo
+            if isinstance(datos_orig, str):
+                try:
+                    datos_orig = json.loads(datos_orig)
+                except:
+                    datos_orig = {}
+            
+            # Obtener página si existe
+            pagina = datos_orig.get('pagina', '')
+            
+            # Determinar si es matutino o vespertino
+            # Por defecto asumimos matutino
+            edicion = 'MAT'
+            if 'vespertino' in str(licitacion.get('titulo', '')).lower():
+                edicion = 'VES'
+            
+            # Formatear fecha para URL
+            if isinstance(fecha_pub, (datetime, date)):
+                fecha_str = fecha_pub.strftime('%d/%m/%Y')
+                
+                # Construir URL del PDF con página específica
+                if pagina:
+                    return f"https://www.dof.gob.mx/nota_to_pdf.php?fecha={fecha_str}&edicion={edicion}#page={pagina}"
+                else:
+                    # Sin página específica, solo el PDF
+                    return f"https://www.dof.gob.mx/nota_to_pdf.php?fecha={fecha_str}&edicion={edicion}"
+    except Exception as e:
+        logger.error(f"Error construyendo URL DOF: {e}")
+    
+    # Si no se puede construir, devolver URL original o vacío
+    return licitacion.get('url_original', '')
+
+def procesar_licitacion_dof(licitacion: dict) -> dict:
+    """
+    Procesa una licitación del DOF para agregar/corregir la URL.
+    
+    Args:
+        licitacion: Diccionario con los datos de la licitación
+        
+    Returns:
+        Licitación con URL procesada
+    """
+    if licitacion.get('fuente') == 'DOF':
+        licitacion['url_original'] = construir_url_dof(licitacion)
+    return licitacion
+
 @app.get("/")
 def root():
     """Endpoint raíz."""
@@ -251,7 +317,8 @@ def get_licitaciones(
             monto_estimado,
             moneda,
             fuente,
-            url_original
+            url_original,
+            datos_originales
         FROM licitaciones 
         WHERE 1=1
     """
@@ -329,8 +396,15 @@ def get_licitaciones(
         cursor.execute(sql, params)
         licitaciones = cursor.fetchall()
         
+        # Procesar licitaciones del DOF para construir URLs correctas
+        licitaciones_procesadas = []
+        for lic in licitaciones:
+            if lic.get('fuente') == 'DOF':
+                lic = procesar_licitacion_dof(lic)
+            licitaciones_procesadas.append(lic)
+        
         return serialize_result({
-            'data': licitaciones,
+            'data': licitaciones_procesadas,
             'pagination': {
                 'total': total,
                 'page': page,
@@ -562,6 +636,10 @@ def get_detalle_licitacion(licitacion_id: int):
         if not licitacion:
             raise HTTPException(status_code=404, detail="Licitación no encontrada")
         
+        # Procesar URL si es del DOF
+        if licitacion.get('fuente') == 'DOF':
+            licitacion = procesar_licitacion_dof(licitacion)
+        
         return serialize_result(licitacion)
 
 @app.get("/busqueda-rapida")
@@ -581,7 +659,9 @@ def busqueda_rapida(
                 entidad_compradora,
                 fecha_publicacion,
                 monto_estimado,
-                fuente
+                fuente,
+                url_original,
+                datos_originales
             FROM licitaciones
             WHERE 
                 numero_procedimiento ILIKE %(q)s
@@ -591,7 +671,16 @@ def busqueda_rapida(
             LIMIT %(limit)s
         """, {'q': f"%{q}%", 'limit': limit})
         
-        return serialize_result(cursor.fetchall())
+        licitaciones = cursor.fetchall()
+        
+        # Procesar URLs del DOF
+        licitaciones_procesadas = []
+        for lic in licitaciones:
+            if lic.get('fuente') == 'DOF':
+                lic = procesar_licitacion_dof(lic)
+            licitaciones_procesadas.append(lic)
+        
+        return serialize_result(licitaciones_procesadas)
 
 if __name__ == "__main__":
     import uvicorn
