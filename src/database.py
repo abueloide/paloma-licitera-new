@@ -29,14 +29,20 @@ class Database:
         """Context manager para conexiones a BD."""
         conn = None
         try:
-            conn = psycopg2.connect(
-                host=self.db_config['host'],
-                port=self.db_config['port'],
-                database=self.db_config['name'],
-                user=self.db_config['user'],
-                password=self.db_config['password'],
-                cursor_factory=psycopg2.extras.RealDictCursor
-            )
+            # Construir parámetros de conexión, omitiendo password si está vacío
+            conn_params = {
+                'host': self.db_config['host'],
+                'port': self.db_config['port'],
+                'database': self.db_config['name'],
+                'user': self.db_config['user'],
+                'cursor_factory': psycopg2.extras.RealDictCursor
+            }
+            
+            # Solo agregar password si no está vacío
+            if self.db_config.get('password') and self.db_config['password'].strip():
+                conn_params['password'] = self.db_config['password']
+            
+            conn = psycopg2.connect(**conn_params)
             yield conn
             conn.commit()
         except Exception as e:
@@ -95,13 +101,48 @@ class Database:
     
     def insertar_licitacion(self, licitacion: Dict[str, Any]) -> bool:
         """Insertar una licitación en la BD."""
+        # Asegurar que los campos requeridos existen
+        if not licitacion.get('numero_procedimiento'):
+            logger.warning("Licitación sin numero_procedimiento, saltando")
+            return False
+        
+        if not licitacion.get('titulo'):
+            licitacion['titulo'] = licitacion.get('descripcion', 'Sin título')[:500]
+        
+        if not licitacion.get('entidad_compradora'):
+            licitacion['entidad_compradora'] = 'No especificada'
+        
+        if not licitacion.get('fuente'):
+            logger.error("Licitación sin fuente, no se puede insertar")
+            return False
+        
         # Generar hash para deduplicación
         hash_str = f"{licitacion['numero_procedimiento']}_{licitacion['entidad_compradora']}_{licitacion['fuente']}"
         licitacion['hash_contenido'] = hashlib.sha256(hash_str.encode()).hexdigest()
         
-        # Serializar datos originales
-        if 'datos_originales' in licitacion:
-            licitacion['datos_originales'] = json.dumps(licitacion['datos_originales'])
+        # Serializar datos originales si existen
+        if 'datos_originales' in licitacion and licitacion['datos_originales'] is not None:
+            if isinstance(licitacion['datos_originales'], (dict, list)):
+                licitacion['datos_originales'] = json.dumps(licitacion['datos_originales'])
+        else:
+            licitacion['datos_originales'] = None
+        
+        # Asegurar que los campos opcionales existen (con None si no están)
+        campos_opcionales = [
+            'descripcion', 'unidad_compradora', 'tipo_procedimiento', 
+            'tipo_contratacion', 'estado', 'fecha_publicacion', 
+            'fecha_apertura', 'fecha_fallo', 'fecha_junta_aclaraciones',
+            'monto_estimado', 'moneda', 'proveedor_ganador', 
+            'caracter', 'uuid_procedimiento', 'url_original'
+        ]
+        
+        for campo in campos_opcionales:
+            if campo not in licitacion:
+                licitacion[campo] = None
+        
+        # Si moneda no está especificada, usar MXN por defecto
+        if not licitacion.get('moneda'):
+            licitacion['moneda'] = 'MXN'
         
         sql = """
         INSERT INTO licitaciones (
@@ -133,7 +174,8 @@ class Database:
                     logger.debug(f"Licitación duplicada: {licitacion['numero_procedimiento']}")
                     return False
         except Exception as e:
-            logger.error(f"Error insertando licitación: {e}")
+            logger.error(f"Error insertando licitación {licitacion.get('numero_procedimiento', 'UNKNOWN')}: {e}")
+            logger.debug(f"Datos que causaron el error: {licitacion}")
             return False
     
     def obtener_licitaciones(self, filtros: Dict = None, limit: int = 100, offset: int = 0) -> List[Dict]:
