@@ -105,6 +105,40 @@ class TianguisExtractor(BaseExtractor):
             if not tipo_cont:
                 tipo_cont = self.detectar_tipo_contratacion(f"{titulo} {descripcion or ''}")
             
+            # Generar URL correcta para Tianguis Digital
+            # La URL real usa el ID del tender, no el OCID completo
+            # El OCID tiene formato: ocds-87sd3t-XXXXXX donde XXXXXX es el ID del proceso
+            url_original = None
+            
+            # Primero intentar obtener el tender/id que generalmente es el ID directo
+            tender_id = self._extraer_campo_json(row, 'tender/id')
+            
+            if tender_id and str(tender_id).isdigit():
+                # Si tenemos un ID numérico directo, usarlo
+                url_original = f"https://datosabiertostianguisdigital.cdmx.gob.mx/proceso/{tender_id}"
+            elif numero:
+                # Si no, intentar extraer del OCID
+                # El OCID tiene formato: ocds-87sd3t-XXXXXX donde XXXXXX es el ID del proceso
+                proceso_id = numero
+                if 'ocds-' in str(numero):
+                    # Extraer solo el número final del OCID
+                    partes = str(numero).split('-')
+                    if len(partes) >= 3:
+                        proceso_id = partes[-1]  # Tomar la última parte
+                        if proceso_id.isdigit():
+                            url_original = f"https://datosabiertostianguisdigital.cdmx.gob.mx/proceso/{proceso_id}"
+            
+            # Si aún no tenemos URL y hay un campo 'id' directo
+            if not url_original:
+                id_directo = row.get('id', '')
+                if id_directo and str(id_directo).isdigit():
+                    url_original = f"https://datosabiertostianguisdigital.cdmx.gob.mx/proceso/{id_directo}"
+            
+            # Como último recurso, si hay un OCID, generar URL con el OCID completo
+            # (aunque probablemente no sea el formato correcto)
+            if not url_original and row.get('ocid'):
+                url_original = f"https://datosabiertostianguisdigital.cdmx.gob.mx/proceso/{row.get('ocid')}"
+            
             # Crear licitación normalizada
             licitacion = self.normalizar_licitacion(row)
             licitacion.update({
@@ -117,7 +151,7 @@ class TianguisExtractor(BaseExtractor):
                 'fecha_publicacion': fecha_pub or datetime.now().date(),
                 'fecha_apertura': fecha_apertura,
                 'monto_estimado': monto,
-                'url_original': f"https://tianguisdigital.cdmx.gob.mx/ocds/tender/{row.get('ocid', '')}"
+                'url_original': url_original
             })
             
             return licitacion
@@ -144,7 +178,7 @@ class TianguisExtractor(BaseExtractor):
                     
                 # Si es dict, buscar campos comunes
                 if isinstance(parsed, dict):
-                    for field in ['name', 'title', 'value', 'amount']:
+                    for field in ['name', 'title', 'value', 'amount', 'id']:
                         if field in parsed:
                             return parsed[field]
                             
