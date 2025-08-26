@@ -1,309 +1,279 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { 
-  ArrowLeft, 
-  ExternalLink, 
-  Building2, 
-  Calendar, 
-  FileText,
-  Tag,
-  AlertCircle,
-  Loader2
-} from 'lucide-react';
-import { Licitacion } from '../types';
-import { apiService } from '../services/api';
-import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { ArrowLeft, ExternalLink, Download, Calendar, Building, FileText } from "lucide-react";
+import { apiService } from '@/services/api';
 
-const LicitacionDetail: React.FC = () => {
-  const { id } = useParams<{ id: string }>();
-  const [licitacion, setLicitacion] = useState<Licitacion | null>(null);
+const LicitacionDetail = () => {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [licitacion, setLicitacion] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    const fetchLicitacion = async () => {
+    const fetchDetail = async () => {
       if (!id) return;
       
+      setLoading(true);
       try {
-        setLoading(true);
-        setError(null);
         const data = await apiService.getLicitacionDetail(parseInt(id));
         setLicitacion(data);
-      } catch (err) {
-        console.error('Error fetching licitacion detail:', err);
-        setError('Error al cargar los detalles de la licitación.');
+      } catch (err: any) {
+        setError(err.message || 'Error al cargar los detalles');
       } finally {
         setLoading(false);
       }
     };
 
-    fetchLicitacion();
+    fetchDetail();
   }, [id]);
 
-  const formatCurrency = (amount: number) => {
+  const formatDate = (dateString: string | null) => {
+    if (!dateString) return 'No especificada';
+    try {
+      return new Date(dateString).toLocaleDateString('es-MX', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+    } catch {
+      return 'No especificada';
+    }
+  };
+
+  const formatMoney = (amount: number | null) => {
+    if (!amount || amount === 0) return 'No especificado';
     return new Intl.NumberFormat('es-MX', {
       style: 'currency',
       currency: 'MXN',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
     }).format(amount);
   };
 
-  const formatDate = (dateString: string) => {
-    try {
-      return format(new Date(dateString), 'PPP', { locale: es });
-    } catch {
-      return dateString;
-    }
-  };
-
-  const formatDateTime = (dateString: string) => {
-    try {
-      return format(new Date(dateString), 'PPp', { locale: es });
-    } catch {
-      return dateString;
-    }
+  const getDOFUrl = (licitacion: any) => {
+    if (licitacion.fuente !== 'DOF' || !licitacion.url_original) return null;
+    
+    // Determinar si es matutino o vespertino basándose en metadata o fecha
+    const fecha = licitacion.fecha_publicacion;
+    if (!fecha) return licitacion.url_original;
+    
+    const date = new Date(fecha);
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const year = date.getFullYear();
+    
+    // Por defecto usar matutino, pero esto podría mejorar con metadata adicional
+    const edicion = licitacion.metadata?.edicion || 'matutina';
+    
+    return `https://www.dof.gob.mx/nota_to_pdf.php?fecha=${day}/${month}/${year}&edicion=${edicion}`;
   };
 
   if (loading) {
     return (
-      <div className="loading">
-        <Loader2 className="h-8 w-8 animate-spin mr-3" />
-        <span>Cargando detalles...</span>
+      <div className="container mx-auto p-8">
+        <Card>
+          <CardContent className="p-8">
+            <div className="animate-pulse space-y-4">
+              <div className="h-8 bg-muted rounded w-3/4"></div>
+              <div className="h-4 bg-muted rounded w-1/2"></div>
+              <div className="space-y-2">
+                <div className="h-4 bg-muted rounded"></div>
+                <div className="h-4 bg-muted rounded"></div>
+                <div className="h-4 bg-muted rounded w-3/4"></div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   }
 
-  if (error) {
+  if (error || !licitacion) {
     return (
-      <div className="error">
-        <AlertCircle className="h-5 w-5 mr-2 inline" />
-        {error}
+      <div className="container mx-auto p-8">
+        <Card>
+          <CardContent className="p-8">
+            <div className="text-center">
+              <p className="text-red-600 mb-4">{error || 'No se encontró la licitación'}</p>
+              <Button onClick={() => navigate('/')}>
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Volver al Dashboard
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   }
 
-  if (!licitacion) {
-    return (
-      <div className="text-center py-8">
-        <p className="text-gray-600">Licitación no encontrada.</p>
-        <Link to="/licitaciones" className="btn btn-primary mt-4">
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Volver a Licitaciones
-        </Link>
-      </div>
-    );
-  }
+  const dofUrl = getDOFUrl(licitacion);
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <Link 
-          to="/licitaciones" 
-          className="btn btn-outline"
-        >
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Volver
-        </Link>
-        
-        {licitacion.url_original && (
-          <a
-            href={licitacion.url_original}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn btn-primary"
-          >
-            <ExternalLink className="h-4 w-4 mr-2" />
-            Ver Original
-          </a>
-        )}
+    <div className="container mx-auto p-8 max-w-6xl">
+      <div className="mb-6">
+        <Button variant="outline" onClick={() => navigate('/')}>
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          Volver al Dashboard
+        </Button>
       </div>
 
-      {/* Main Information */}
-      <div className="card">
-        <div className="card-header">
-          <div className="flex items-start justify-between">
+      <Card className="mb-6">
+        <CardHeader>
+          <div className="flex justify-between items-start">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 mb-2">
-                {licitacion.titulo}
-              </h1>
-              <div className="flex items-center space-x-4 text-sm text-gray-600">
-                <span className="flex items-center">
-                  <FileText className="h-4 w-4 mr-1" />
-                  {licitacion.numero_procedimiento}
-                </span>
-                <span className="flex items-center">
-                  <Tag className="h-4 w-4 mr-1" />
-                  {licitacion.fuente}
-                </span>
-              </div>
+              <CardTitle className="text-2xl mb-2">{licitacion.titulo || 'Sin título'}</CardTitle>
+              <CardDescription className="text-lg">
+                {licitacion.numero_procedimiento || 'Sin número de procedimiento'}
+              </CardDescription>
             </div>
-            
-            {licitacion.estado && (
-              <span className={`inline-flex px-3 py-1 text-sm font-medium rounded-full ${
-                licitacion.estado === 'ACTIVA' || licitacion.estado === 'ABIERTA' 
-                  ? 'bg-green-100 text-green-800'
-                  : licitacion.estado === 'CERRADA' || licitacion.estado === 'FINALIZADA'
-                  ? 'bg-gray-100 text-gray-800'
-                  : 'bg-blue-100 text-blue-800'
-              }`}>
-                {licitacion.estado}
-              </span>
-            )}
+            <Badge className="text-lg px-3 py-1">{licitacion.fuente}</Badge>
           </div>
-        </div>
-        
-        <div className="card-body">
+        </CardHeader>
+        <CardContent>
           {licitacion.descripcion && (
             <div className="mb-6">
-              <h3 className="font-semibold text-gray-900 mb-2">Descripción</h3>
-              <p className="text-gray-700 leading-relaxed">
-                {licitacion.descripcion}
-              </p>
+              <h3 className="font-semibold mb-2">Descripción</h3>
+              <p className="text-muted-foreground whitespace-pre-wrap">{licitacion.descripcion}</p>
             </div>
           )}
-        </div>
-      </div>
 
-      {/* Details Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Entity Information */}
-        <div className="card">
-          <div className="card-header">
-            <div className="flex items-center">
-              <Building2 className="h-5 w-5 mr-2 text-blue-600" />
-              <h3 className="font-semibold">Información de Entidad</h3>
-            </div>
-          </div>
-          <div className="card-body space-y-4">
-            {licitacion.entidad_compradora && (
-              <div>
-                <label className="text-sm font-medium text-gray-600">Entidad Compradora</label>
-                <p className="mt-1 text-gray-900">{licitacion.entidad_compradora}</p>
-              </div>
-            )}
-            
-            {licitacion.unidad_compradora && (
-              <div>
-                <label className="text-sm font-medium text-gray-600">Unidad Compradora</label>
-                <p className="mt-1 text-gray-900">{licitacion.unidad_compradora}</p>
-              </div>
-            )}
-            
-            {licitacion.tipo_procedimiento && (
-              <div>
-                <label className="text-sm font-medium text-gray-600">Tipo de Procedimiento</label>
-                <p className="mt-1 text-gray-900">{licitacion.tipo_procedimiento}</p>
-              </div>
-            )}
-            
-            {licitacion.tipo_contratacion && (
-              <div>
-                <label className="text-sm font-medium text-gray-600">Tipo de Contratación</label>
-                <p className="mt-1 text-gray-900">{licitacion.tipo_contratacion}</p>
-              </div>
-            )}
-          </div>
-        </div>
+          <Separator className="my-6" />
 
-        {/* Dates and Money */}
-        <div className="card">
-          <div className="card-header">
-            <div className="flex items-center">
-              <Calendar className="h-5 w-5 mr-2 text-green-600" />
-              <h3 className="font-semibold">Fechas y Montos</h3>
-            </div>
-          </div>
-          <div className="card-body space-y-4">
-            {licitacion.fecha_publicacion && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-4">
               <div>
-                <label className="text-sm font-medium text-gray-600">Fecha de Publicación</label>
-                <p className="mt-1 text-gray-900">{formatDate(licitacion.fecha_publicacion)}</p>
-              </div>
-            )}
-            
-            {licitacion.fecha_apertura && (
-              <div>
-                <label className="text-sm font-medium text-gray-600">Fecha de Apertura</label>
-                <p className="mt-1 text-gray-900">{formatDate(licitacion.fecha_apertura)}</p>
-              </div>
-            )}
-            
-            {licitacion.fecha_fallo && (
-              <div>
-                <label className="text-sm font-medium text-gray-600">Fecha de Fallo</label>
-                <p className="mt-1 text-gray-900">{formatDate(licitacion.fecha_fallo)}</p>
-              </div>
-            )}
-            
-            {licitacion.monto_estimado && (
-              <div>
-                <label className="text-sm font-medium text-gray-600">Monto Estimado</label>
-                <p className="mt-1 text-gray-900 text-lg font-semibold text-green-600">
-                  {formatCurrency(licitacion.monto_estimado)}
-                  {licitacion.moneda && licitacion.moneda !== 'MXN' && (
-                    <span className="text-sm text-gray-500 ml-2">({licitacion.moneda})</span>
+                <h3 className="font-semibold mb-2 flex items-center gap-2">
+                  <Building className="h-4 w-4" />
+                  Información de la Entidad
+                </h3>
+                <div className="space-y-2 text-sm">
+                  <div>
+                    <span className="text-muted-foreground">Entidad Compradora:</span>
+                    <p className="font-medium">{licitacion.entidad_compradora || 'No especificada'}</p>
+                  </div>
+                  {licitacion.unidad_compradora && (
+                    <div>
+                      <span className="text-muted-foreground">Unidad Compradora:</span>
+                      <p className="font-medium">{licitacion.unidad_compradora}</p>
+                    </div>
                   )}
-                </p>
+                </div>
               </div>
-            )}
-          </div>
-        </div>
-      </div>
 
-      {/* Technical Information */}
-      <div className="card">
-        <div className="card-header">
-          <h3 className="font-semibold">Información Técnica</h3>
-        </div>
-        <div className="card-body">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <div>
-              <label className="text-sm font-medium text-gray-600">ID del Sistema</label>
-              <p className="mt-1 text-gray-900">{licitacion.id}</p>
-            </div>
-            
-            <div>
-              <label className="text-sm font-medium text-gray-600">Fuente de Datos</label>
-              <p className="mt-1 text-gray-900">{licitacion.fuente}</p>
-            </div>
-            
-            {licitacion.fecha_captura && (
               <div>
-                <label className="text-sm font-medium text-gray-600">Fecha de Captura</label>
-                <p className="mt-1 text-gray-900">{formatDateTime(licitacion.fecha_captura)}</p>
+                <h3 className="font-semibold mb-2 flex items-center gap-2">
+                  <FileText className="h-4 w-4" />
+                  Tipo de Contratación
+                </h3>
+                <div className="space-y-2 text-sm">
+                  <div>
+                    <span className="text-muted-foreground">Tipo de Procedimiento:</span>
+                    <p className="font-medium">{licitacion.tipo_procedimiento || 'No especificado'}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Tipo de Contratación:</span>
+                    <p className="font-medium">{licitacion.tipo_contratacion || 'No especificado'}</p>
+                  </div>
+                  {licitacion.estado && (
+                    <div>
+                      <span className="text-muted-foreground">Estado:</span>
+                      <p className="font-medium">{licitacion.estado}</p>
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
-            
-            {licitacion.hash_contenido && (
-              <div className="md:col-span-2 lg:col-span-3">
-                <label className="text-sm font-medium text-gray-600">Hash de Contenido</label>
-                <p className="mt-1 text-gray-900 font-mono text-xs break-all">
-                  {licitacion.hash_contenido}
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
+            </div>
 
-      {/* Raw Data */}
-      {licitacion.datos_originales && (
-        <div className="card">
-          <div className="card-header">
-            <h3 className="font-semibold">Datos Originales</h3>
-          </div>
-          <div className="card-body">
-            <div className="bg-gray-50 rounded p-4 overflow-x-auto">
-              <pre className="text-xs text-gray-700">
-                {JSON.stringify(licitacion.datos_originales, null, 2)}
-              </pre>
+            <div className="space-y-4">
+              <div>
+                <h3 className="font-semibold mb-2 flex items-center gap-2">
+                  <Calendar className="h-4 w-4" />
+                  Fechas Importantes
+                </h3>
+                <div className="space-y-2 text-sm">
+                  <div>
+                    <span className="text-muted-foreground">Fecha de Publicación:</span>
+                    <p className="font-medium">{formatDate(licitacion.fecha_publicacion)}</p>
+                  </div>
+                  {licitacion.fecha_apertura && (
+                    <div>
+                      <span className="text-muted-foreground">Fecha de Apertura:</span>
+                      <p className="font-medium">{formatDate(licitacion.fecha_apertura)}</p>
+                    </div>
+                  )}
+                  {licitacion.fecha_fallo && (
+                    <div>
+                      <span className="text-muted-foreground">Fecha de Fallo:</span>
+                      <p className="font-medium">{formatDate(licitacion.fecha_fallo)}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {(licitacion.monto_estimado > 0 || licitacion.moneda) && (
+                <div>
+                  <h3 className="font-semibold mb-2">Información Económica</h3>
+                  <div className="space-y-2 text-sm">
+                    {licitacion.monto_estimado > 0 && (
+                      <div>
+                        <span className="text-muted-foreground">Monto Estimado:</span>
+                        <p className="font-medium text-lg">{formatMoney(licitacion.monto_estimado)}</p>
+                      </div>
+                    )}
+                    {licitacion.moneda && (
+                      <div>
+                        <span className="text-muted-foreground">Moneda:</span>
+                        <p className="font-medium">{licitacion.moneda}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
-        </div>
-      )}
+
+          <Separator className="my-6" />
+
+          <div className="flex gap-4">
+            {licitacion.url_original && (
+              <Button variant="default" asChild>
+                <a href={licitacion.url_original} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink className="mr-2 h-4 w-4" />
+                  Ver en Sitio Original
+                </a>
+              </Button>
+            )}
+            
+            {dofUrl && (
+              <Button variant="outline" asChild>
+                <a href={dofUrl} target="_blank" rel="noopener noreferrer">
+                  <Download className="mr-2 h-4 w-4" />
+                  Descargar PDF del DOF
+                </a>
+              </Button>
+            )}
+          </div>
+
+          {licitacion.metadata && Object.keys(licitacion.metadata).length > 0 && (
+            <>
+              <Separator className="my-6" />
+              <div>
+                <h3 className="font-semibold mb-2">Información Adicional</h3>
+                <div className="bg-muted p-4 rounded-lg">
+                  <pre className="text-xs overflow-x-auto">
+                    {JSON.stringify(licitacion.metadata, null, 2)}
+                  </pre>
+                </div>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 };
