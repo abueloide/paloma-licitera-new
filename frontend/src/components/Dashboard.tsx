@@ -20,6 +20,7 @@ const Dashboard = () => {
   const [filtros, setFiltros] = useState<Filtros | null>(null);
   const [licitaciones, setLicitaciones] = useState<LicitacionesResponse | null>(null);
   const [tiposData, setTiposData] = useState<AnalisisPorTipo[]>([]);
+  const [temporalData, setTemporalData] = useState<Array<{ mes: string; cantidad: number; acumulado: number }>>([]);
   
   // Loading states
   const [statsLoading, setStatsLoading] = useState(true);
@@ -29,10 +30,9 @@ const Dashboard = () => {
 
   // Filters
   const [currentFilters, setCurrentFilters] = useState<{
-    fuente?: string;
-    tipo_contratacion?: string;
-    entidad_compradora?: string;
-    estado?: string;
+    tipo_contratacion?: string[];
+    entidad_compradora?: string[];
+    dias_apertura?: number;
     busqueda?: string;
   }>({});
   const [currentPage, setCurrentPage] = useState(1);
@@ -90,8 +90,13 @@ const Dashboard = () => {
 
   const fetchChartsData = useCallback(async () => {
     try {
+      // Fetch tipo contratación data
       const tiposAnalisis = await apiService.getAnalisisPorTipoContratacion();
       setTiposData(tiposAnalisis);
+      
+      // Fetch temporal acumulado data
+      const temporalResponse = await apiService.getAnalisisTemporalAcumulado();
+      setTemporalData(temporalResponse);
     } catch (error) {
       toast({
         title: "Error",
@@ -130,27 +135,6 @@ const Dashboard = () => {
     return () => clearInterval(interval);
   }, [fetchStats]);
 
-  // Prepare charts data
-  const fuentesData = stats
-    ? [
-        { 
-          name: 'TIANGUIS', 
-          value: stats.por_fuente?.find(f => f.fuente === 'TIANGUIS')?.cantidad || 0, 
-          color: '#3b82f6' 
-        },
-        { 
-          name: 'COMPRASMX', 
-          value: stats.por_fuente?.find(f => f.fuente === 'COMPRASMX')?.cantidad || 0, 
-          color: '#a855f7' 
-        },
-        { 
-          name: 'DOF', 
-          value: stats.por_fuente?.find(f => f.fuente === 'DOF')?.cantidad || 0, 
-          color: '#059669' 
-        },
-      ]
-    : [];
-
   return (
     <div className="min-h-screen p-4 md:p-8">
       <div className="max-w-7xl mx-auto">
@@ -165,8 +149,8 @@ const Dashboard = () => {
         />
         
         <Charts
-          fuentesData={fuentesData}
           tiposData={tiposData}
+          temporalData={temporalData}
           loading={chartsLoading}
         />
         
