@@ -1,19 +1,24 @@
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ChevronLeft, ChevronRight, Eye } from "lucide-react";
-import { Licitacion, LicitacionesResponse } from "@/lib/api";
-import { formatMoney, formatDate, getBadgeColor, getEstadoBadgeColor } from "@/lib/formatters";
+import { ChevronLeft, ChevronRight, Eye, ExternalLink } from "lucide-react";
+import { LicitacionesResponse } from "@/types";
 
 interface DataTableProps {
   data: LicitacionesResponse | null;
   loading: boolean;
   onPageChange: (page: number) => void;
-  onViewDetails: (licitacion: Licitacion) => void;
 }
 
-const DataTable = ({ data, loading, onPageChange, onViewDetails }: DataTableProps) => {
+const DataTable = ({ data, loading, onPageChange }: DataTableProps) => {
+  const navigate = useNavigate();
+
+  const handleViewDetails = (licitacionId: number) => {
+    navigate(`/licitacion/${licitacionId}`);
+  };
+
   if (loading) {
     return (
       <Card className="card-shadow">
@@ -31,8 +36,7 @@ const DataTable = ({ data, loading, onPageChange, onViewDetails }: DataTableProp
     );
   }
 
-  // Safe check for data and licitaciones
-  if (!data || !data.licitaciones || !Array.isArray(data.licitaciones) || data.licitaciones.length === 0) {
+  if (!data || !data.data || data.data.length === 0) {
     return (
       <Card className="card-shadow">
         <CardHeader>
@@ -47,7 +51,30 @@ const DataTable = ({ data, loading, onPageChange, onViewDetails }: DataTableProp
     );
   }
 
-  const { licitaciones, total = 0, page = 1, total_pages = 1 } = data;
+  const { data: licitaciones, pagination } = data;
+  const { total = 0, page = 1, total_pages = 1 } = pagination || {};
+
+  const formatDate = (dateString: string | null) => {
+    if (!dateString) return 'N/A';
+    try {
+      return new Date(dateString).toLocaleDateString('es-MX', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      });
+    } catch {
+      return 'N/A';
+    }
+  };
+
+  const getFuenteColor = (fuente: string) => {
+    switch(fuente) {
+      case 'TIANGUIS': return 'bg-blue-100 text-blue-800';
+      case 'COMPRASMX': return 'bg-purple-100 text-purple-800';
+      case 'DOF': return 'bg-green-100 text-green-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
 
   return (
     <Card className="card-shadow">
@@ -61,62 +88,62 @@ const DataTable = ({ data, loading, onPageChange, onViewDetails }: DataTableProp
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Número</TableHead>
-                <TableHead>Título</TableHead>
-                <TableHead>Entidad</TableHead>
-                <TableHead>Tipo</TableHead>
-                <TableHead>Monto</TableHead>
-                <TableHead>Fecha</TableHead>
+                <TableHead className="min-w-[150px]">Número Procedimiento</TableHead>
+                <TableHead className="min-w-[300px]">Título</TableHead>
+                <TableHead className="min-w-[200px]">Entidad Compradora</TableHead>
+                <TableHead className="min-w-[150px]">Tipo Procedimiento</TableHead>
+                <TableHead className="min-w-[150px]">Tipo Contratación</TableHead>
+                <TableHead>Fecha Publicación</TableHead>
+                <TableHead>Fecha Apertura</TableHead>
                 <TableHead>Fuente</TableHead>
-                <TableHead>Estado</TableHead>
                 <TableHead>Acciones</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {licitaciones.map((licitacion) => (
-                <TableRow key={licitacion.id}>
+                <TableRow key={licitacion.id} className="hover:bg-muted/50 cursor-pointer">
                   <TableCell className="font-mono text-sm">
-                    {licitacion.numero_licitacion || 'N/A'}
+                    {licitacion.numero_procedimiento || 'N/A'}
                   </TableCell>
-                  <TableCell className="max-w-xs">
-                    <div className="truncate" title={licitacion.titulo || ''}>
+                  <TableCell>
+                    <div className="max-w-xs truncate" title={licitacion.titulo || ''}>
                       {licitacion.titulo || 'Sin título'}
                     </div>
                   </TableCell>
-                  <TableCell className="max-w-xs">
-                    <div className="truncate" title={licitacion.entidad_compradora || ''}>
+                  <TableCell>
+                    <div className="max-w-xs truncate" title={licitacion.entidad_compradora || ''}>
                       {licitacion.entidad_compradora || 'Sin especificar'}
                     </div>
                   </TableCell>
-                  <TableCell className="max-w-xs">
-                    <div className="truncate" title={licitacion.tipo_contratacion || ''}>
-                      {licitacion.tipo_contratacion || 'Sin especificar'}
+                  <TableCell>
+                    <div className="text-sm">
+                      {licitacion.tipo_procedimiento || 'N/A'}
                     </div>
                   </TableCell>
-                  <TableCell className="money-text">
-                    {formatMoney(licitacion.monto || 0)}
+                  <TableCell>
+                    <div className="text-sm">
+                      {licitacion.tipo_contratacion || 'N/A'}
+                    </div>
                   </TableCell>
                   <TableCell>
                     {formatDate(licitacion.fecha_publicacion)}
                   </TableCell>
                   <TableCell>
-                    <Badge className={getBadgeColor(licitacion.fuente || 'DESCONOCIDO')}>
-                      {licitacion.fuente || 'DESCONOCIDO'}
-                    </Badge>
+                    {formatDate(licitacion.fecha_apertura)}
                   </TableCell>
                   <TableCell>
-                    <Badge 
-                      variant="secondary" 
-                      className={getEstadoBadgeColor(licitacion.estado || 'DESCONOCIDO')}
-                    >
-                      {licitacion.estado || 'DESCONOCIDO'}
+                    <Badge className={getFuenteColor(licitacion.fuente || '')}>
+                      {licitacion.fuente || 'N/A'}
                     </Badge>
                   </TableCell>
                   <TableCell>
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => onViewDetails(licitacion)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleViewDetails(licitacion.id);
+                      }}
                       className="flex items-center gap-1"
                     >
                       <Eye className="h-3 w-3" />
