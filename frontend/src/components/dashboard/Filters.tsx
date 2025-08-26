@@ -1,56 +1,108 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { Filtros } from "@/types";
-import { Search, RotateCcw } from "lucide-react";
+import { Search, RotateCcw, ChevronDown, ChevronUp } from "lucide-react";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface FiltersProps {
   filtros: Filtros | null;
   onFilterChange: (filters: {
-    fuente?: string;
-    tipo_contratacion?: string;
-    entidad_compradora?: string;
-    estado?: string;
+    tipo_contratacion?: string[];
+    entidad_compradora?: string[];
+    dias_apertura?: number;
     busqueda?: string;
   }) => void;
   loading: boolean;
 }
 
 const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
-  const [selectedFilters, setSelectedFilters] = useState({
-    fuente: "all",
-    tipo_contratacion: "all",
-    entidad_compradora: "all",
-    estado: "all",
-    busqueda: "",
-  });
+  const [selectedTipos, setSelectedTipos] = useState<string[]>([]);
+  const [selectedEntidades, setSelectedEntidades] = useState<string[]>([]);
+  const [diasApertura, setDiasApertura] = useState<string>("");
+  const [busqueda, setBusqueda] = useState("");
+  const [showTipos, setShowTipos] = useState(false);
+  const [showEntidades, setShowEntidades] = useState(false);
 
-  const handleFilterChange = (key: string, value: string) => {
-    const newFilters = { ...selectedFilters, [key]: value };
-    setSelectedFilters(newFilters);
+  const extractOptions = (data: any, fieldName: string): Array<{value: string, count: number}> => {
+    if (!data) return [];
     
-    // Convert "all" to undefined for API
-    const apiFilters = Object.fromEntries(
-      Object.entries(newFilters).map(([k, v]) => [
-        k, 
-        v === "all" || v === "" ? undefined : v
-      ])
-    );
+    if (Array.isArray(data)) {
+      return data
+        .map((item: any) => {
+          if (typeof item === 'object' && item !== null) {
+            return {
+              value: item[fieldName] || '',
+              count: item.cantidad || 0
+            };
+          }
+          return { value: item, count: 0 };
+        })
+        .filter(item => item.value !== '');
+    }
     
-    onFilterChange(apiFilters);
+    return [];
+  };
+
+  const tiposContratacion = extractOptions(filtros?.tipos_contratacion, 'tipo_contratacion');
+  const entidadesCompradoras = extractOptions(filtros?.top_entidades, 'entidad_compradora');
+
+  const handleTipoToggle = (tipo: string) => {
+    const newTipos = selectedTipos.includes(tipo)
+      ? selectedTipos.filter(t => t !== tipo)
+      : [...selectedTipos, tipo];
+    setSelectedTipos(newTipos);
+    applyFilters(newTipos, selectedEntidades, diasApertura);
+  };
+
+  const handleEntidadToggle = (entidad: string) => {
+    const newEntidades = selectedEntidades.includes(entidad)
+      ? selectedEntidades.filter(e => e !== entidad)
+      : [...selectedEntidades, entidad];
+    setSelectedEntidades(newEntidades);
+    applyFilters(selectedTipos, newEntidades, diasApertura);
+  };
+
+  const handleDiasAperturaChange = (value: string) => {
+    setDiasApertura(value);
+    applyFilters(selectedTipos, selectedEntidades, value);
+  };
+
+  const handleBusquedaChange = (value: string) => {
+    setBusqueda(value);
+    applyFilters(selectedTipos, selectedEntidades, diasApertura, value);
+  };
+
+  const applyFilters = (tipos: string[], entidades: string[], dias: string, search: string = busqueda) => {
+    const filters: any = {};
+    
+    if (tipos.length > 0) {
+      filters.tipo_contratacion = tipos;
+    }
+    
+    if (entidades.length > 0) {
+      filters.entidad_compradora = entidades;
+    }
+    
+    if (dias && !isNaN(parseInt(dias))) {
+      filters.dias_apertura = parseInt(dias);
+    }
+    
+    if (search) {
+      filters.busqueda = search;
+    }
+    
+    onFilterChange(filters);
   };
 
   const handleReset = () => {
-    const resetFilters = {
-      fuente: "all",
-      tipo_contratacion: "all",
-      entidad_compradora: "all",
-      estado: "all",
-      busqueda: "",
-    };
-    setSelectedFilters(resetFilters);
+    setSelectedTipos([]);
+    setSelectedEntidades([]);
+    setDiasApertura("");
+    setBusqueda("");
     onFilterChange({});
   };
 
@@ -64,8 +116,8 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {[1, 2, 3, 4].map((i) => (
               <div key={i} className="h-10 bg-muted animate-pulse rounded"></div>
             ))}
           </div>
@@ -73,37 +125,6 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
       </Card>
     );
   }
-
-  // Helper function to extract values from different data formats
-  const extractOptions = (data: any, fieldName: string): string[] => {
-    if (!data) return [];
-    
-    if (Array.isArray(data)) {
-      // If it's already an array of strings
-      if (typeof data[0] === 'string') {
-        return data.filter(item => item && item !== '');
-      }
-      // If it's an array of objects, extract the key names
-      if (typeof data[0] === 'object' && data[0] !== null) {
-        return data
-          .map((item: any) => {
-            // Look for the field that matches the fieldName
-            if (item[fieldName]) return item[fieldName];
-            // Fallback to the first string field
-            const firstStringValue = Object.values(item).find(v => typeof v === 'string' && v !== '');
-            return firstStringValue;
-          })
-          .filter((item: any) => item && item !== '');
-      }
-    }
-    
-    return [];
-  };
-
-  const fuentes = extractOptions(filtros.fuentes, 'fuente');
-  const tiposContratacion = extractOptions(filtros.tipos_contratacion, 'tipo_contratacion');
-  const entidadesCompradoras = extractOptions(filtros.top_entidades, 'entidad_compradora');
-  const estados = extractOptions(filtros.estados, 'estado');
 
   return (
     <Card className="card-shadow mb-8">
@@ -114,90 +135,123 @@ const Filters = ({ filtros, onFilterChange, loading }: FiltersProps) => {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
-          <Select
-            value={selectedFilters.fuente}
-            onValueChange={(value) => handleFilterChange("fuente", value)}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Fuente" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas las fuentes</SelectItem>
-              {fuentes.map((fuente, index) => (
-                <SelectItem key={`fuente-${index}-${fuente}`} value={fuente}>
-                  {fuente}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Filtro de Entidades */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>Entidad Compradora</Label>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowEntidades(!showEntidades)}
+              >
+                {showEntidades ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </Button>
+            </div>
+            {showEntidades && (
+              <ScrollArea className="h-48 w-full rounded-md border p-4">
+                <div className="space-y-2">
+                  {entidadesCompradoras.slice(0, 30).map((entidad, index) => (
+                    <div key={`entidad-${index}`} className="flex items-center space-x-2">
+                      <Checkbox
+                        id={`entidad-${index}`}
+                        checked={selectedEntidades.includes(entidad.value)}
+                        onCheckedChange={() => handleEntidadToggle(entidad.value)}
+                      />
+                      <Label
+                        htmlFor={`entidad-${index}`}
+                        className="text-sm font-normal cursor-pointer"
+                      >
+                        {entidad.value.length > 40 ? 
+                          `${entidad.value.substring(0, 40)}...` : 
+                          entidad.value} ({entidad.count})
+                      </Label>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            )}
+            {selectedEntidades.length > 0 && (
+              <div className="text-xs text-muted-foreground">
+                {selectedEntidades.length} seleccionadas
+              </div>
+            )}
+          </div>
 
-          <Select
-            value={selectedFilters.tipo_contratacion}
-            onValueChange={(value) => handleFilterChange("tipo_contratacion", value)}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Tipo" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos los tipos</SelectItem>
-              {tiposContratacion.slice(0, 20).map((tipo, index) => (
-                <SelectItem key={`tipo-${index}-${tipo}`} value={tipo}>
-                  {tipo}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {/* Filtro de Tipos de Contratación */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>Tipo de Contratación</Label>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowTipos(!showTipos)}
+              >
+                {showTipos ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </Button>
+            </div>
+            {showTipos && (
+              <ScrollArea className="h-48 w-full rounded-md border p-4">
+                <div className="space-y-2">
+                  {tiposContratacion.slice(0, 20).map((tipo, index) => (
+                    <div key={`tipo-${index}`} className="flex items-center space-x-2">
+                      <Checkbox
+                        id={`tipo-${index}`}
+                        checked={selectedTipos.includes(tipo.value)}
+                        onCheckedChange={() => handleTipoToggle(tipo.value)}
+                      />
+                      <Label
+                        htmlFor={`tipo-${index}`}
+                        className="text-sm font-normal cursor-pointer"
+                      >
+                        {tipo.value} ({tipo.count})
+                      </Label>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            )}
+            {selectedTipos.length > 0 && (
+              <div className="text-xs text-muted-foreground">
+                {selectedTipos.length} seleccionados
+              </div>
+            )}
+          </div>
 
-          <Select
-            value={selectedFilters.entidad_compradora}
-            onValueChange={(value) => handleFilterChange("entidad_compradora", value)}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Entidad" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas las entidades</SelectItem>
-              {entidadesCompradoras.slice(0, 50).map((entidad, index) => (
-                <SelectItem key={`entidad-${index}-${entidad}`} value={entidad}>
-                  {entidad.length > 30 ? `${entidad.substring(0, 30)}...` : entidad}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {/* Filtro de Días para Apertura */}
+          <div className="space-y-2">
+            <Label htmlFor="dias-apertura">Días para Apertura</Label>
+            <Input
+              id="dias-apertura"
+              type="number"
+              placeholder="Ej: 30"
+              value={diasApertura}
+              onChange={(e) => handleDiasAperturaChange(e.target.value)}
+              min="1"
+            />
+            <div className="text-xs text-muted-foreground">
+              Licitaciones que abren en los próximos X días
+            </div>
+          </div>
 
-          <Select
-            value={selectedFilters.estado}
-            onValueChange={(value) => handleFilterChange("estado", value)}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Estado" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos los estados</SelectItem>
-              {estados.map((estado, index) => (
-                <SelectItem key={`estado-${index}-${estado}`} value={estado}>
-                  {estado}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Input
-            placeholder="Buscar..."
-            value={selectedFilters.busqueda}
-            onChange={(e) => handleFilterChange("busqueda", e.target.value)}
-            className="md:col-span-1"
-          />
-
-          <Button
-            variant="outline"
-            onClick={handleReset}
-            className="flex items-center gap-2"
-          >
-            <RotateCcw className="h-4 w-4" />
-            Reset
-          </Button>
+          {/* Búsqueda y Reset */}
+          <div className="space-y-2">
+            <Label htmlFor="busqueda">Buscar</Label>
+            <Input
+              id="busqueda"
+              placeholder="Buscar..."
+              value={busqueda}
+              onChange={(e) => handleBusquedaChange(e.target.value)}
+            />
+            <Button
+              variant="outline"
+              onClick={handleReset}
+              className="w-full flex items-center gap-2"
+            >
+              <RotateCcw className="h-4 w-4" />
+              Reset
+            </Button>
+          </div>
         </div>
       </CardContent>
     </Card>
