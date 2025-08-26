@@ -101,7 +101,6 @@ case $COMMAND in
         mkdir -p data/raw/dof
         mkdir -p data/raw/comprasmx
         mkdir -p data/raw/tianguis
-        mkdir -p data/raw/sitios-masivos
         mkdir -p data/processed
         
         echo ""
@@ -231,8 +230,10 @@ case $COMMAND in
         echo "Archivos de datos:"
         [ -d "data/raw/dof" ] && DOF_FILES=$(ls data/raw/dof/*.txt 2>/dev/null | wc -l) || DOF_FILES=0
         [ -d "data/raw/comprasmx" ] && COMPRAS_FILES=$(ls data/raw/comprasmx/*.json 2>/dev/null | wc -l) || COMPRAS_FILES=0
+        [ -d "data/raw/tianguis" ] && TIANGUIS_FILES=$(ls data/raw/tianguis/*.json 2>/dev/null | wc -l) || TIANGUIS_FILES=0
         echo "  - DOF: $DOF_FILES archivos TXT"
         echo "  - ComprasMX: $COMPRAS_FILES archivos JSON"
+        echo "  - Tianguis: $TIANGUIS_FILES archivos JSON"
         ;;
         
     download)
@@ -242,12 +243,11 @@ case $COMMAND in
         source venv/bin/activate
         
         echo "Selecciona qué descargar:"
-        echo "1) Todo (puede tardar 10-20 minutos)"
+        echo "1) Todo (ComprasMX, DOF, Tianguis)"
         echo "2) Solo procesar archivos existentes (sin descargar)"
         echo "3) Solo ComprasMX"
         echo "4) Solo DOF"
         echo "5) Solo Tianguis Digital"
-        echo "6) Solo Sitios Masivos"
         echo -n "Opción: "
         read option
         
@@ -282,10 +282,6 @@ case $COMMAND in
             5)
                 print_info "Descargando Tianguis Digital..."
                 python src/etl.py --fuente tianguis
-                ;;
-            6)
-                print_info "Descargando Sitios Masivos..."
-                python src/etl.py --fuente sitios-masivos
                 ;;
             *)
                 print_error "Opción inválida"
@@ -508,6 +504,11 @@ case $COMMAND in
         echo "  reset-db          - Limpia la base de datos (elimina todos los registros)"
         echo "  repopulate        - Re-procesa archivos existentes sin descargar"
         echo "  full-reset        - Limpia BD, descarga TODO y repobla desde cero"
+        echo ""
+        echo "FUENTES DE DATOS:"
+        echo "  - ComprasMX: Portal de compras del gobierno"
+        echo "  - DOF: Diario Oficial de la Federación"
+        echo "  - Tianguis Digital: Plataforma de contrataciones"
         echo ""
         echo "FLUJO TÍPICO DE INSTALACIÓN:"
         echo "  1. ./paloma.sh install       # Primera vez"
