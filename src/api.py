@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-API REST para Paloma Licitera
-API principal que se conecta a PostgreSQL con los datos reales
+API REST para Paloma Licitera - Versión con modelo híbrido
+Incluye filtros geográficos y datos específicos por fuente
 """
 
 from fastapi import FastAPI, HTTPException, Query
@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)
 # Crear aplicación FastAPI
 app = FastAPI(
     title="Paloma Licitera API",
-    description="API para consulta y análisis de licitaciones gubernamentales",
-    version="2.0.0"
+    description="API para consulta y análisis de licitaciones gubernamentales con modelo híbrido",
+    version="3.0.0"
 )
 
 # Configurar CORS
@@ -39,7 +39,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Cargar configuración - buscar en el directorio padre (raíz del proyecto)
+# Cargar configuración
 config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.yaml')
 with open(config_path, 'r') as f:
     config = yaml.safe_load(f)
@@ -55,7 +55,7 @@ def get_db_connection():
             port=db_config['port'],
             database=db_config['name'],
             user=db_config['user'],
-            password=db_config['password'],
+            password=db_config.get('password', ''),
             cursor_factory=psycopg2.extras.RealDictCursor
         )
         yield conn
@@ -82,35 +82,20 @@ def serialize_result(result):
     return result
 
 def construir_url_dof(licitacion: dict) -> str:
-    """
-    Construye la URL correcta para licitaciones del DOF.
-    Formato: https://dof.gob.mx/index_111.php?year=YYYY&month=MM&day=DD#gsc.tab=0
-    
-    Args:
-        licitacion: Diccionario con los datos de la licitación
-        
-    Returns:
-        URL del DOF o la URL original si no se puede construir
-    """
+    """Construye la URL correcta para licitaciones del DOF."""
     try:
-        # Si ya tiene url_original válida del DOF, usarla
         if licitacion.get('url_original') and 'dof.gob.mx' in str(licitacion.get('url_original', '')):
             return licitacion['url_original']
         
-        # Intentar obtener la fecha del ejemplar desde datos_originales
         datos_orig = licitacion.get('datos_originales', {})
-        if datos_orig:
-            # Si datos_originales es string JSON, parsearlo
-            if isinstance(datos_orig, str):
-                try:
-                    datos_orig = json.loads(datos_orig)
-                except:
-                    datos_orig = {}
+        if datos_orig and isinstance(datos_orig, str):
+            try:
+                datos_orig = json.loads(datos_orig)
+            except:
+                datos_orig = {}
         
-        # Buscar fecha del ejemplar del DOF (no la fecha de publicación de la licitación)
         fecha_ejemplar = None
         
-        # Primero intentar desde datos_originales
         if datos_orig:
             fecha_ejemplar_str = datos_orig.get('fecha_ejemplar', '')
             if fecha_ejemplar_str:
@@ -122,9 +107,7 @@ def construir_url_dof(licitacion: dict) -> str:
                 except:
                     pass
         
-        # Si no hay fecha de ejemplar, intentar extraerla del nombre del archivo o URL original
         if not fecha_ejemplar and licitacion.get('url_original'):
-            # Buscar patrón DDMMYYYY en la URL (ej: 24082025-MAT)
             match = re.search(r'(\d{2})(\d{2})(\d{4})-(?:MAT|VES)', str(licitacion.get('url_original', '')))
             if match:
                 dia, mes, año = match.groups()
@@ -133,7 +116,6 @@ def construir_url_dof(licitacion: dict) -> str:
                 except:
                     pass
         
-        # Si tampoco, usar fecha_publicacion como fallback
         if not fecha_ejemplar:
             fecha_pub = licitacion.get('fecha_publicacion')
             if fecha_pub:
@@ -149,32 +131,19 @@ def construir_url_dof(licitacion: dict) -> str:
                     fecha_ejemplar = fecha_pub
         
         if fecha_ejemplar:
-            # Formatear para la URL del índice del DOF
             año = fecha_ejemplar.strftime('%Y')
             mes = fecha_ejemplar.strftime('%m')
             dia = fecha_ejemplar.strftime('%d')
-            
-            # Construir URL del índice del DOF para ese día
             url = f"https://dof.gob.mx/index_111.php?year={año}&month={mes}&day={dia}#gsc.tab=0"
-            
             return url
             
     except Exception as e:
         logger.error(f"Error construyendo URL DOF: {e}")
     
-    # Si no se puede construir, devolver URL original o vacío
     return licitacion.get('url_original', '')
 
 def procesar_licitacion_dof(licitacion: dict) -> dict:
-    """
-    Procesa una licitación del DOF para agregar/corregir la URL.
-    
-    Args:
-        licitacion: Diccionario con los datos de la licitación
-        
-    Returns:
-        Licitación con URL procesada
-    """
+    """Procesa una licitación del DOF para agregar/corregir la URL."""
     if licitacion.get('fuente') == 'DOF':
         licitacion['url_original'] = construir_url_dof(licitacion)
     return licitacion
@@ -183,17 +152,20 @@ def procesar_licitacion_dof(licitacion: dict) -> dict:
 def root():
     """Endpoint raíz."""
     return {
-        "mensaje": "API Paloma Licitera",
-        "version": "2.0.0",
+        "mensaje": "API Paloma Licitera - Modelo Híbrido",
+        "version": "3.0.0",
         "endpoints": [
             "/stats",
             "/licitaciones",
             "/filtros",
+            "/filtros-geograficos",
             "/analisis/por-tipo-contratacion",
             "/analisis/por-dependencia",
             "/analisis/por-fuente",
+            "/analisis/por-estado",
             "/analisis/temporal",
             "/analisis/temporal-acumulado",
+            "/analisis/geografico",
             "/detalle/{id}",
             "/busqueda-rapida",
             "/top-entidad",
@@ -203,7 +175,7 @@ def root():
 
 @app.get("/stats")
 def get_statistics():
-    """Obtener estadísticas generales."""
+    """Obtener estadísticas generales incluyendo datos geográficos."""
     with get_db_connection() as conn:
         cursor = conn.cursor()
         
@@ -230,6 +202,17 @@ def get_statistics():
         """)
         por_estado = cursor.fetchall()
         
+        # Por entidad federativa (nuevo)
+        cursor.execute("""
+            SELECT entidad_federativa, COUNT(*) as cantidad 
+            FROM licitaciones 
+            WHERE entidad_federativa IS NOT NULL
+            GROUP BY entidad_federativa
+            ORDER BY cantidad DESC
+            LIMIT 10
+        """)
+        por_entidad_federativa = cursor.fetchall()
+        
         # Por tipo de contratación
         cursor.execute("""
             SELECT tipo_contratacion, COUNT(*) as cantidad 
@@ -240,7 +223,17 @@ def get_statistics():
         """)
         por_tipo_contratacion = cursor.fetchall()
         
-        # Top entidad compradora con más licitaciones
+        # Estadísticas de datos procesados
+        cursor.execute("""
+            SELECT 
+                SUM(CASE WHEN entidad_federativa IS NOT NULL THEN 1 ELSE 0 END) as con_entidad,
+                SUM(CASE WHEN municipio IS NOT NULL THEN 1 ELSE 0 END) as con_municipio,
+                SUM(CASE WHEN datos_especificos IS NOT NULL THEN 1 ELSE 0 END) as con_datos_especificos
+            FROM licitaciones
+        """)
+        procesamiento = cursor.fetchone()
+        
+        # Top entidad compradora
         cursor.execute("""
             SELECT entidad_compradora, COUNT(*) as cantidad
             FROM licitaciones
@@ -250,17 +243,6 @@ def get_statistics():
             LIMIT 1
         """)
         top_entidad = cursor.fetchone()
-        
-        # Top tipo de contratación con más licitaciones
-        cursor.execute("""
-            SELECT tipo_contratacion, COUNT(*) as cantidad
-            FROM licitaciones
-            WHERE tipo_contratacion IS NOT NULL
-            GROUP BY tipo_contratacion
-            ORDER BY cantidad DESC
-            LIMIT 1
-        """)
-        top_tipo = cursor.fetchone()
         
         # Últimas actualizaciones
         cursor.execute("""
@@ -274,49 +256,20 @@ def get_statistics():
             'total': total,
             'por_fuente': por_fuente,
             'por_estado': por_estado,
+            'por_entidad_federativa': por_entidad_federativa,
             'por_tipo_contratacion': por_tipo_contratacion,
+            'procesamiento': procesamiento,
             'top_entidad': top_entidad,
-            'top_tipo_contratacion': top_tipo,
             'ultimas_actualizaciones': actualizaciones,
             'fecha_consulta': datetime.now()
         })
-
-@app.get("/top-entidad")
-def get_top_entidad():
-    """Obtener la entidad con más licitaciones."""
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT entidad_compradora, COUNT(*) as cantidad
-            FROM licitaciones
-            WHERE entidad_compradora IS NOT NULL
-            GROUP BY entidad_compradora
-            ORDER BY cantidad DESC
-            LIMIT 1
-        """)
-        result = cursor.fetchone()
-        return serialize_result(result if result else {"entidad_compradora": "No disponible", "cantidad": 0})
-
-@app.get("/top-tipo-contratacion")
-def get_top_tipo_contratacion():
-    """Obtener el tipo de contratación con más licitaciones."""
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT tipo_contratacion, COUNT(*) as cantidad
-            FROM licitaciones
-            WHERE tipo_contratacion IS NOT NULL
-            GROUP BY tipo_contratacion
-            ORDER BY cantidad DESC
-            LIMIT 1
-        """)
-        result = cursor.fetchone()
-        return serialize_result(result if result else {"tipo_contratacion": "No disponible", "cantidad": 0})
 
 @app.get("/licitaciones")
 def get_licitaciones(
     fuente: Optional[str] = None,
     estado: Optional[str] = None,
+    entidad_federativa: Optional[str] = None,
+    municipio: Optional[str] = None,
     tipo_contratacion: Optional[List[str]] = Query(None),
     tipo_procedimiento: Optional[List[str]] = Query(None),
     entidad_compradora: Optional[List[str]] = Query(None),
@@ -329,10 +282,9 @@ def get_licitaciones(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500)
 ):
-    """Obtener licitaciones con filtros avanzados."""
+    """Obtener licitaciones con filtros avanzados incluyendo geográficos."""
     offset = (page - 1) * page_size
     
-    # Construir query SQL dinámicamente
     sql = """
         SELECT 
             id,
@@ -344,6 +296,8 @@ def get_licitaciones(
             tipo_procedimiento,
             tipo_contratacion,
             estado,
+            entidad_federativa,
+            municipio,
             fecha_publicacion,
             fecha_apertura,
             fecha_fallo,
@@ -351,7 +305,8 @@ def get_licitaciones(
             moneda,
             fuente,
             url_original,
-            datos_originales
+            datos_originales,
+            datos_especificos
         FROM licitaciones 
         WHERE 1=1
     """
@@ -365,6 +320,14 @@ def get_licitaciones(
     if estado:
         sql += " AND estado = %(estado)s"
         params['estado'] = estado
+    
+    if entidad_federativa:
+        sql += " AND entidad_federativa = %(entidad_federativa)s"
+        params['entidad_federativa'] = entidad_federativa
+    
+    if municipio:
+        sql += " AND municipio ILIKE %(municipio)s"
+        params['municipio'] = f"%{municipio}%"
     
     if tipo_contratacion:
         sql += " AND tipo_contratacion = ANY(%(tipo_contratacion)s)"
@@ -429,7 +392,7 @@ def get_licitaciones(
         cursor.execute(sql, params)
         licitaciones = cursor.fetchall()
         
-        # Procesar licitaciones del DOF para construir URLs correctas
+        # Procesar licitaciones del DOF
         licitaciones_procesadas = []
         for lic in licitaciones:
             if lic.get('fuente') == 'DOF':
@@ -448,7 +411,7 @@ def get_licitaciones(
 
 @app.get("/filtros")
 def get_filtros():
-    """Obtener valores únicos para filtros."""
+    """Obtener valores únicos para filtros básicos."""
     with get_db_connection() as conn:
         cursor = conn.cursor()
         
@@ -511,6 +474,153 @@ def get_filtros():
             'top_entidades': entidades
         })
 
+@app.get("/filtros-geograficos")
+def get_filtros_geograficos():
+    """Obtener filtros geográficos disponibles."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        
+        # Entidades federativas con conteo
+        cursor.execute("""
+            SELECT 
+                entidad_federativa, 
+                COUNT(*) as cantidad,
+                COUNT(DISTINCT municipio) as municipios_unicos
+            FROM licitaciones
+            WHERE entidad_federativa IS NOT NULL
+            GROUP BY entidad_federativa
+            ORDER BY cantidad DESC
+        """)
+        entidades_federativas = cursor.fetchall()
+        
+        # Top municipios
+        cursor.execute("""
+            SELECT 
+                municipio,
+                entidad_federativa,
+                COUNT(*) as cantidad
+            FROM licitaciones
+            WHERE municipio IS NOT NULL
+            GROUP BY municipio, entidad_federativa
+            ORDER BY cantidad DESC
+            LIMIT 50
+        """)
+        top_municipios = cursor.fetchall()
+        
+        # Cobertura geográfica
+        cursor.execute("""
+            SELECT 
+                COUNT(DISTINCT entidad_federativa) as estados_con_datos,
+                COUNT(DISTINCT municipio) as municipios_con_datos,
+                SUM(CASE WHEN entidad_federativa IS NOT NULL THEN 1 ELSE 0 END) as licitaciones_con_estado,
+                SUM(CASE WHEN municipio IS NOT NULL THEN 1 ELSE 0 END) as licitaciones_con_municipio,
+                COUNT(*) as total_licitaciones
+            FROM licitaciones
+        """)
+        cobertura = cursor.fetchone()
+        
+        return serialize_result({
+            'entidades_federativas': entidades_federativas,
+            'top_municipios': top_municipios,
+            'cobertura': cobertura
+        })
+
+@app.get("/analisis/por-estado")
+def analisis_por_estado():
+    """Análisis detallado por entidad federativa."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT 
+                entidad_federativa,
+                COUNT(*) as total_licitaciones,
+                COUNT(DISTINCT entidad_compradora) as entidades_unicas,
+                COUNT(DISTINCT tipo_contratacion) as tipos_contratacion,
+                COUNT(DISTINCT municipio) as municipios_unicos,
+                SUM(monto_estimado) as monto_total,
+                AVG(monto_estimado) as monto_promedio,
+                MAX(monto_estimado) as monto_maximo,
+                MIN(fecha_publicacion) as primera_licitacion,
+                MAX(fecha_publicacion) as ultima_licitacion,
+                COUNT(DISTINCT fuente) as fuentes_datos
+            FROM licitaciones
+            WHERE entidad_federativa IS NOT NULL
+            GROUP BY entidad_federativa
+            ORDER BY total_licitaciones DESC
+        """)
+        
+        return serialize_result(cursor.fetchall())
+
+@app.get("/analisis/geografico")
+def analisis_geografico(
+    entidad_federativa: Optional[str] = None
+):
+    """Análisis geográfico detallado."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        
+        if entidad_federativa:
+            # Análisis por municipios de un estado específico
+            cursor.execute("""
+                SELECT 
+                    municipio,
+                    COUNT(*) as cantidad,
+                    SUM(monto_estimado) as monto_total,
+                    AVG(monto_estimado) as monto_promedio,
+                    COUNT(DISTINCT entidad_compradora) as entidades_unicas,
+                    COUNT(DISTINCT tipo_contratacion) as tipos_contratacion
+                FROM licitaciones
+                WHERE entidad_federativa = %(entidad)s
+                    AND municipio IS NOT NULL
+                GROUP BY municipio
+                ORDER BY cantidad DESC
+            """, {'entidad': entidad_federativa})
+            
+            municipios = cursor.fetchall()
+            
+            # Estadísticas del estado
+            cursor.execute("""
+                SELECT 
+                    COUNT(*) as total,
+                    COUNT(DISTINCT municipio) as municipios_totales,
+                    SUM(monto_estimado) as monto_total,
+                    AVG(monto_estimado) as monto_promedio
+                FROM licitaciones
+                WHERE entidad_federativa = %(entidad)s
+            """, {'entidad': entidad_federativa})
+            
+            resumen = cursor.fetchone()
+            
+            return serialize_result({
+                'entidad_federativa': entidad_federativa,
+                'resumen': resumen,
+                'municipios': municipios
+            })
+        else:
+            # Mapa de calor nacional
+            cursor.execute("""
+                SELECT 
+                    entidad_federativa,
+                    COUNT(*) as cantidad,
+                    SUM(monto_estimado) as monto_total,
+                    AVG(monto_estimado) as monto_promedio,
+                    COUNT(DISTINCT municipio) as municipios_activos,
+                    ROUND(
+                        COUNT(*)::numeric * 100.0 / 
+                        (SELECT COUNT(*) FROM licitaciones WHERE entidad_federativa IS NOT NULL)::numeric, 
+                        2
+                    ) as porcentaje_nacional
+                FROM licitaciones
+                WHERE entidad_federativa IS NOT NULL
+                GROUP BY entidad_federativa
+                ORDER BY cantidad DESC
+            """)
+            
+            return serialize_result({
+                'distribucion_nacional': cursor.fetchall()
+            })
+
 @app.get("/analisis/por-tipo-contratacion")
 def analisis_por_tipo_contratacion():
     """Análisis detallado por tipo de contratación."""
@@ -525,7 +635,8 @@ def analisis_por_tipo_contratacion():
                 AVG(monto_estimado) as monto_promedio,
                 MAX(monto_estimado) as monto_maximo,
                 MIN(monto_estimado) as monto_minimo,
-                COUNT(DISTINCT entidad_compradora) as entidades_unicas
+                COUNT(DISTINCT entidad_compradora) as entidades_unicas,
+                COUNT(DISTINCT entidad_federativa) as estados_involucrados
             FROM licitaciones
             WHERE tipo_contratacion IS NOT NULL
             GROUP BY tipo_contratacion
@@ -536,13 +647,14 @@ def analisis_por_tipo_contratacion():
 
 @app.get("/analisis/por-dependencia")
 def analisis_por_dependencia(
-    limit: int = Query(20, ge=1, le=100)
+    limit: int = Query(20, ge=1, le=100),
+    entidad_federativa: Optional[str] = None
 ):
-    """Análisis detallado por dependencia."""
+    """Análisis detallado por dependencia con filtro geográfico opcional."""
     with get_db_connection() as conn:
         cursor = conn.cursor()
         
-        cursor.execute("""
+        sql = """
             SELECT 
                 entidad_compradora,
                 COUNT(*) as cantidad_licitaciones,
@@ -550,20 +662,32 @@ def analisis_por_dependencia(
                 AVG(monto_estimado) as monto_promedio,
                 COUNT(DISTINCT tipo_contratacion) as tipos_contratacion,
                 COUNT(DISTINCT tipo_procedimiento) as tipos_procedimiento,
+                COUNT(DISTINCT entidad_federativa) as estados_cobertura,
                 MIN(fecha_publicacion) as primera_licitacion,
                 MAX(fecha_publicacion) as ultima_licitacion
             FROM licitaciones
             WHERE entidad_compradora IS NOT NULL
+        """
+        
+        params = {'limit': limit}
+        
+        if entidad_federativa:
+            sql += " AND entidad_federativa = %(entidad)s"
+            params['entidad'] = entidad_federativa
+        
+        sql += """
             GROUP BY entidad_compradora
             ORDER BY cantidad_licitaciones DESC
             LIMIT %(limit)s
-        """, {'limit': limit})
+        """
+        
+        cursor.execute(sql, params)
         
         return serialize_result(cursor.fetchall())
 
 @app.get("/analisis/por-fuente")
 def analisis_por_fuente():
-    """Análisis comparativo por fuente de datos."""
+    """Análisis comparativo por fuente de datos con métricas geográficas."""
     with get_db_connection() as conn:
         cursor = conn.cursor()
         
@@ -573,6 +697,10 @@ def analisis_por_fuente():
                 COUNT(*) as total_licitaciones,
                 COUNT(DISTINCT entidad_compradora) as entidades_unicas,
                 COUNT(DISTINCT tipo_contratacion) as tipos_contratacion,
+                COUNT(DISTINCT entidad_federativa) as estados_cubiertos,
+                COUNT(DISTINCT municipio) as municipios_cubiertos,
+                SUM(CASE WHEN entidad_federativa IS NOT NULL THEN 1 ELSE 0 END) as con_estado,
+                SUM(CASE WHEN municipio IS NOT NULL THEN 1 ELSE 0 END) as con_municipio,
                 SUM(CASE WHEN monto_estimado > 0 THEN 1 ELSE 0 END) as con_monto,
                 SUM(monto_estimado) as monto_total,
                 AVG(monto_estimado) as monto_promedio,
@@ -588,11 +716,11 @@ def analisis_por_fuente():
 
 @app.get("/analisis/temporal")
 def analisis_temporal(
-    granularidad: str = Query("mes", regex="^(dia|semana|mes|año)$")
+    granularidad: str = Query("mes", regex="^(dia|semana|mes|año)$"),
+    entidad_federativa: Optional[str] = None
 ):
-    """Análisis temporal de licitaciones."""
+    """Análisis temporal de licitaciones con filtro geográfico opcional."""
     
-    # Mapear granularidad a formato de fecha SQL
     date_formats = {
         'dia': 'YYYY-MM-DD',
         'semana': 'YYYY-IW',
@@ -605,58 +733,37 @@ def analisis_temporal(
     with get_db_connection() as conn:
         cursor = conn.cursor()
         
-        cursor.execute(f"""
+        sql = f"""
             SELECT 
                 TO_CHAR(fecha_publicacion, '{date_format}') as periodo,
                 COUNT(*) as cantidad,
                 SUM(monto_estimado) as monto_total,
                 COUNT(DISTINCT entidad_compradora) as entidades_unicas,
-                COUNT(DISTINCT fuente) as fuentes
+                COUNT(DISTINCT fuente) as fuentes,
+                COUNT(DISTINCT entidad_federativa) as estados_involucrados
             FROM licitaciones
             WHERE fecha_publicacion IS NOT NULL
                 AND fecha_publicacion >= CURRENT_DATE - INTERVAL '1 year'
+        """
+        
+        params = {}
+        
+        if entidad_federativa:
+            sql += " AND entidad_federativa = %(entidad)s"
+            params['entidad'] = entidad_federativa
+        
+        sql += """
             GROUP BY periodo
             ORDER BY periodo DESC
-        """)
+        """
+        
+        cursor.execute(sql, params)
         
         return serialize_result(cursor.fetchall())
 
-@app.get("/analisis/temporal-acumulado")
-def analisis_temporal_acumulado():
-    """Análisis temporal acumulado del año actual."""
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        
-        # Obtener datos mensuales del año actual
-        cursor.execute("""
-            SELECT 
-                TO_CHAR(fecha_publicacion, 'YYYY-MM') as mes,
-                COUNT(*) as cantidad
-            FROM licitaciones
-            WHERE fecha_publicacion IS NOT NULL
-                AND EXTRACT(YEAR FROM fecha_publicacion) = EXTRACT(YEAR FROM CURRENT_DATE)
-            GROUP BY mes
-            ORDER BY mes
-        """)
-        
-        datos = cursor.fetchall()
-        
-        # Calcular acumulado
-        acumulado = 0
-        resultado = []
-        for row in datos:
-            acumulado += row['cantidad']
-            resultado.append({
-                'mes': row['mes'],
-                'cantidad': row['cantidad'],
-                'acumulado': acumulado
-            })
-        
-        return serialize_result(resultado)
-
 @app.get("/detalle/{licitacion_id}")
 def get_detalle_licitacion(licitacion_id: int):
-    """Obtener detalles completos de una licitación."""
+    """Obtener detalles completos de una licitación incluyendo datos parseados."""
     with get_db_connection() as conn:
         cursor = conn.cursor()
         
@@ -672,6 +779,14 @@ def get_detalle_licitacion(licitacion_id: int):
         # Procesar URL si es del DOF
         if licitacion.get('fuente') == 'DOF':
             licitacion = procesar_licitacion_dof(licitacion)
+        
+        # Parsear datos_especificos si existe
+        if licitacion.get('datos_especificos'):
+            try:
+                if isinstance(licitacion['datos_especificos'], str):
+                    licitacion['datos_especificos'] = json.loads(licitacion['datos_especificos'])
+            except:
+                pass
         
         return serialize_result(licitacion)
 
@@ -690,6 +805,8 @@ def busqueda_rapida(
                 numero_procedimiento,
                 titulo,
                 entidad_compradora,
+                entidad_federativa,
+                municipio,
                 fecha_publicacion,
                 monto_estimado,
                 fuente,
@@ -700,6 +817,8 @@ def busqueda_rapida(
                 numero_procedimiento ILIKE %(q)s
                 OR titulo ILIKE %(q)s
                 OR entidad_compradora ILIKE %(q)s
+                OR entidad_federativa ILIKE %(q)s
+                OR municipio ILIKE %(q)s
             ORDER BY fecha_publicacion DESC
             LIMIT %(limit)s
         """, {'q': f"%{q}%", 'limit': limit})
@@ -714,6 +833,38 @@ def busqueda_rapida(
             licitaciones_procesadas.append(lic)
         
         return serialize_result(licitaciones_procesadas)
+
+@app.get("/top-entidad")
+def get_top_entidad():
+    """Obtener la entidad con más licitaciones."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT entidad_compradora, COUNT(*) as cantidad
+            FROM licitaciones
+            WHERE entidad_compradora IS NOT NULL
+            GROUP BY entidad_compradora
+            ORDER BY cantidad DESC
+            LIMIT 1
+        """)
+        result = cursor.fetchone()
+        return serialize_result(result if result else {"entidad_compradora": "No disponible", "cantidad": 0})
+
+@app.get("/top-tipo-contratacion")
+def get_top_tipo_contratacion():
+    """Obtener el tipo de contratación con más licitaciones."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT tipo_contratacion, COUNT(*) as cantidad
+            FROM licitaciones
+            WHERE tipo_contratacion IS NOT NULL
+            GROUP BY tipo_contratacion
+            ORDER BY cantidad DESC
+            LIMIT 1
+        """)
+        result = cursor.fetchone()
+        return serialize_result(result if result else {"tipo_contratacion": "No disponible", "cantidad": 0})
 
 if __name__ == "__main__":
     import uvicorn
