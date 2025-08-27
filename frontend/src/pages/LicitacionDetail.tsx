@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, ExternalLink, Download, Calendar, Building, FileText } from "lucide-react";
+import { ArrowLeft, ExternalLink, Calendar, Building, FileText } from "lucide-react";
 import { apiService } from '@/services/api';
 
 const LicitacionDetail = () => {
@@ -54,24 +54,6 @@ const LicitacionDetail = () => {
     }).format(amount);
   };
 
-  const getDOFUrl = (licitacion: any) => {
-    if (licitacion.fuente !== 'DOF' || !licitacion.url_original) return null;
-    
-    // Determinar si es matutino o vespertino basándose en metadata o fecha
-    const fecha = licitacion.fecha_publicacion;
-    if (!fecha) return licitacion.url_original;
-    
-    const date = new Date(fecha);
-    const day = date.getDate().toString().padStart(2, '0');
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const year = date.getFullYear();
-    
-    // Por defecto usar matutino, pero esto podría mejorar con metadata adicional
-    const edicion = licitacion.metadata?.edicion || 'matutina';
-    
-    return `https://www.dof.gob.mx/nota_to_pdf.php?fecha=${day}/${month}/${year}&edicion=${edicion}`;
-  };
-
   if (loading) {
     return (
       <div className="container mx-auto p-8">
@@ -109,8 +91,6 @@ const LicitacionDetail = () => {
       </div>
     );
   }
-
-  const dofUrl = getDOFUrl(licitacion);
 
   return (
     <div className="container mx-auto p-8 max-w-6xl">
@@ -244,15 +224,6 @@ const LicitacionDetail = () => {
                 <a href={licitacion.url_original} target="_blank" rel="noopener noreferrer">
                   <ExternalLink className="mr-2 h-4 w-4" />
                   Ver en Sitio Original
-                </a>
-              </Button>
-            )}
-            
-            {dofUrl && (
-              <Button variant="outline" asChild>
-                <a href={dofUrl} target="_blank" rel="noopener noreferrer">
-                  <Download className="mr-2 h-4 w-4" />
-                  Descargar PDF del DOF
                 </a>
               </Button>
             )}
