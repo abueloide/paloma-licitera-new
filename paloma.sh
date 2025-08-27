@@ -122,23 +122,23 @@ setup_postgres() {
     fi
 }
 
-# Función para crear las tablas de la base de datos CON EL ESQUEMA CORRECTO
+# Función para crear las tablas de la base de datos CON EL ESQUEMA HÍBRIDO CORRECTO
 create_database_tables() {
     print_info "Verificando estructura de base de datos..."
     
-    # Verificar si la tabla existe y tiene la estructura correcta
-    TIENE_MONTO_ESTIMADO=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT column_name FROM information_schema.columns WHERE table_name='licitaciones' AND column_name='monto_estimado';" 2>/dev/null || echo "")
+    # Verificar si la tabla existe y tiene los campos del modelo híbrido
+    TIENE_ENTIDAD_FED=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT column_name FROM information_schema.columns WHERE table_name='licitaciones' AND column_name='entidad_federativa';" 2>/dev/null || echo "")
     
-    if [ -z "$TIENE_MONTO_ESTIMADO" ]; then
-        print_warning "Tabla con estructura antigua detectada, actualizando..."
+    if [ -z "$TIENE_ENTIDAD_FED" ]; then
+        print_warning "Tabla con estructura antigua detectada, actualizando al modelo híbrido..."
         
         # Eliminar tabla vieja si existe
         psql -h localhost -U postgres -d paloma_licitera -c "DROP TABLE IF EXISTS licitaciones CASCADE;" 2>/dev/null
     fi
     
-    print_info "Creando tabla 'licitaciones' con estructura correcta..."
+    print_info "Creando tabla 'licitaciones' con modelo híbrido..."
     
-    # Crear tabla con el esquema CORRECTO que coincide con database.py
+    # Crear tabla con el esquema HÍBRIDO que coincide con database.py actual
     psql -h localhost -U postgres -d paloma_licitera << 'EOF'
 CREATE TABLE IF NOT EXISTS licitaciones (
     id SERIAL PRIMARY KEY,
@@ -168,7 +168,7 @@ CREATE TABLE IF NOT EXISTS licitaciones (
     fecha_fallo DATE,
     fecha_junta_aclaraciones DATE,
     
-    -- Montos (CAMPO CRÍTICO QUE FALTABA)
+    -- Montos
     monto_estimado DECIMAL(15,2),
     moneda VARCHAR(10) DEFAULT 'MXN',
     
@@ -181,11 +181,16 @@ CREATE TABLE IF NOT EXISTS licitaciones (
     fecha_captura TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     datos_originales JSONB,
     
+    -- CAMPOS DEL MODELO HÍBRIDO (NUEVOS)
+    entidad_federativa VARCHAR(100),
+    municipio VARCHAR(100),
+    datos_especificos JSONB,
+    
     -- Constraints
     CONSTRAINT uk_licitacion UNIQUE(numero_procedimiento, entidad_compradora, fuente)
 );
 
--- Crear índices para búsquedas rápidas
+-- Índices existentes
 CREATE INDEX IF NOT EXISTS idx_numero_procedimiento ON licitaciones(numero_procedimiento);
 CREATE INDEX IF NOT EXISTS idx_entidad ON licitaciones(entidad_compradora);
 CREATE INDEX IF NOT EXISTS idx_fecha_pub ON licitaciones(fecha_publicacion);
@@ -195,17 +200,26 @@ CREATE INDEX IF NOT EXISTS idx_tipo_procedimiento ON licitaciones(tipo_procedimi
 CREATE INDEX IF NOT EXISTS idx_tipo_contratacion ON licitaciones(tipo_contratacion);
 CREATE INDEX IF NOT EXISTS idx_uuid ON licitaciones(uuid_procedimiento);
 CREATE INDEX IF NOT EXISTS idx_hash ON licitaciones(hash_contenido);
+
+-- ÍNDICES NUEVOS PARA MODELO HÍBRIDO
+CREATE INDEX IF NOT EXISTS idx_entidad_federativa ON licitaciones(entidad_federativa);
+CREATE INDEX IF NOT EXISTS idx_municipio ON licitaciones(municipio);
+CREATE INDEX IF NOT EXISTS idx_entidad_municipio ON licitaciones(entidad_federativa, municipio);
+CREATE INDEX IF NOT EXISTS idx_datos_especificos_gin ON licitaciones USING GIN(datos_especificos);
 EOF
 
     if [ $? -eq 0 ]; then
-        print_status "Estructura de base de datos creada exitosamente"
+        print_status "Estructura de base de datos híbrida creada exitosamente"
         
-        # Verificar que monto_estimado existe
-        VERIFICAR=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT column_name FROM information_schema.columns WHERE table_name='licitaciones' AND column_name='monto_estimado';" 2>/dev/null || echo "")
-        if [ -n "$VERIFICAR" ]; then
-            print_status "✅ Campo 'monto_estimado' verificado correctamente"
+        # Verificar campos críticos
+        VERIFICAR_MONTO=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT column_name FROM information_schema.columns WHERE table_name='licitaciones' AND column_name='monto_estimado';" 2>/dev/null || echo "")
+        VERIFICAR_ENTIDAD=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT column_name FROM information_schema.columns WHERE table_name='licitaciones' AND column_name='entidad_federativa';" 2>/dev/null || echo "")
+        VERIFICAR_DATOS=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT column_name FROM information_schema.columns WHERE table_name='licitaciones' AND column_name='datos_especificos';" 2>/dev/null || echo "")
+        
+        if [ -n "$VERIFICAR_MONTO" ] && [ -n "$VERIFICAR_ENTIDAD" ] && [ -n "$VERIFICAR_DATOS" ]; then
+            print_status "✅ Modelo híbrido verificado correctamente (entidad_federativa, municipio, datos_especificos)"
         else
-            print_error "❌ Campo 'monto_estimado' NO se creó correctamente"
+            print_error "❌ Campos del modelo híbrido NO se crearon correctamente"
             return 1
         fi
         
@@ -260,12 +274,14 @@ case $COMMAND in
             DOF_FILES=$(ls data/raw/dof/*.txt 2>/dev/null | wc -l)
             COMPRAS_FILES=$(ls data/raw/comprasmx/*.json 2>/dev/null | wc -l)
             TIANGUIS_FILES=$(ls data/raw/tianguis/*.json 2>/dev/null | wc -l)
+            SITIOS_FILES=$(ls data/raw/sitios-masivos/*.jsonl 2>/dev/null | wc -l)
             
             echo "  - DOF: $DOF_FILES archivos"
             echo "  - ComprasMX: $COMPRAS_FILES archivos"
             echo "  - Tianguis: $TIANGUIS_FILES archivos"
+            echo "  - Sitios Masivos: $SITIOS_FILES archivos"
             
-            TOTAL_FILES=$((DOF_FILES + COMPRAS_FILES + TIANGUIS_FILES))
+            TOTAL_FILES=$((DOF_FILES + COMPRAS_FILES + TIANGUIS_FILES + SITIOS_FILES))
             if [ $TOTAL_FILES -gt 0 ]; then
                 print_status "Hay $TOTAL_FILES archivos de datos disponibles"
             else
@@ -274,7 +290,7 @@ case $COMMAND in
             fi
         else
             print_warning "No existe el directorio de datos"
-            mkdir -p data/raw/{dof,comprasmx,tianguis}
+            mkdir -p data/raw/{dof,comprasmx,tianguis,sitios-masivos}
             print_status "Directorios creados"
         fi
         
@@ -360,17 +376,20 @@ case $COMMAND in
         mkdir -p data/raw/dof
         mkdir -p data/raw/comprasmx
         mkdir -p data/raw/tianguis
+        mkdir -p data/raw/sitios-masivos
         mkdir -p data/processed
         
         # Verificar estado final de PostgreSQL
         echo ""
         if psql -h localhost -U postgres -d paloma_licitera -c "SELECT 1;" > /dev/null 2>&1; then
-            # Verificar que la tabla tenga el campo correcto
-            VERIFICAR=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT column_name FROM information_schema.columns WHERE table_name='licitaciones' AND column_name='monto_estimado';" 2>/dev/null || echo "")
-            if [ -n "$VERIFICAR" ]; then
+            # Verificar que la tabla tenga los campos del modelo híbrido
+            VERIFICAR_ENTIDAD=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT column_name FROM information_schema.columns WHERE table_name='licitaciones' AND column_name='entidad_federativa';" 2>/dev/null || echo "")
+            VERIFICAR_DATOS=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT column_name FROM information_schema.columns WHERE table_name='licitaciones' AND column_name='datos_especificos';" 2>/dev/null || echo "")
+            
+            if [ -n "$VERIFICAR_ENTIDAD" ] && [ -n "$VERIFICAR_DATOS" ]; then
                 RECORDS=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT COUNT(*) FROM licitaciones;" 2>/dev/null || echo "0")
                 print_status "PostgreSQL conectado - Base de datos lista con $RECORDS registros"
-                print_status "✅ Esquema de BD correcto (monto_estimado existe)"
+                print_status "✅ Esquema de BD híbrido correcto (entidad_federativa, municipio, datos_especificos)"
             else
                 print_warning "⚠️ Esquema de BD incorrecto - ejecuta: ./paloma.sh reset-db"
             fi
@@ -484,12 +503,15 @@ case $COMMAND in
             RECORDS=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT COUNT(*) FROM licitaciones;" 2>/dev/null || echo "0")
             print_status "PostgreSQL: OK ($RECORDS registros)"
             
-            # Verificar esquema
-            VERIFICAR=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT column_name FROM information_schema.columns WHERE table_name='licitaciones' AND column_name='monto_estimado';" 2>/dev/null || echo "")
-            if [ -n "$VERIFICAR" ]; then
-                print_status "Esquema de BD: CORRECTO ✅"
+            # Verificar esquema híbrido
+            VERIFICAR_ENTIDAD=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT column_name FROM information_schema.columns WHERE table_name='licitaciones' AND column_name='entidad_federativa';" 2>/dev/null || echo "")
+            VERIFICAR_MUNICIPIO=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT column_name FROM information_schema.columns WHERE table_name='licitaciones' AND column_name='municipio';" 2>/dev/null || echo "")
+            VERIFICAR_DATOS=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT column_name FROM information_schema.columns WHERE table_name='licitaciones' AND column_name='datos_especificos';" 2>/dev/null || echo "")
+            
+            if [ -n "$VERIFICAR_ENTIDAD" ] && [ -n "$VERIFICAR_MUNICIPIO" ] && [ -n "$VERIFICAR_DATOS" ]; then
+                print_status "Esquema de BD: MODELO HÍBRIDO ✅"
             else
-                print_error "Esquema de BD: INCORRECTO ❌ (falta monto_estimado)"
+                print_error "Esquema de BD: INCORRECTO ❌ (faltan campos del modelo híbrido)"
                 echo "  Ejecuta: ./paloma.sh reset-db"
             fi
             
@@ -500,6 +522,16 @@ case $COMMAND in
                 psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT fuente, COUNT(*) FROM licitaciones GROUP BY fuente ORDER BY COUNT(*) DESC;" 2>/dev/null | while IFS='|' read fuente count; do
                     echo "  - $fuente: $count"
                 done
+                
+                # Estadísticas por entidad federativa (si hay datos)
+                TIENE_ENTIDADES=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT COUNT(DISTINCT entidad_federativa) FROM licitaciones WHERE entidad_federativa IS NOT NULL;" 2>/dev/null || echo "0")
+                if [ "$TIENE_ENTIDADES" -gt 0 ]; then
+                    echo ""
+                    echo "Top 5 Entidades Federativas:"
+                    psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT entidad_federativa, COUNT(*) FROM licitaciones WHERE entidad_federativa IS NOT NULL GROUP BY entidad_federativa ORDER BY COUNT(*) DESC LIMIT 5;" 2>/dev/null | while IFS='|' read entidad count; do
+                        echo "  - $entidad: $count"
+                    done
+                fi
             fi
         else
             print_error "PostgreSQL: NO CONECTADO"
@@ -526,9 +558,11 @@ case $COMMAND in
         [ -d "data/raw/dof" ] && DOF_FILES=$(ls data/raw/dof/*.txt 2>/dev/null | wc -l) || DOF_FILES=0
         [ -d "data/raw/comprasmx" ] && COMPRAS_FILES=$(ls data/raw/comprasmx/*.json 2>/dev/null | wc -l) || COMPRAS_FILES=0
         [ -d "data/raw/tianguis" ] && TIANGUIS_FILES=$(ls data/raw/tianguis/*.json 2>/dev/null | wc -l) || TIANGUIS_FILES=0
+        [ -d "data/raw/sitios-masivos" ] && SITIOS_FILES=$(ls data/raw/sitios-masivos/*.jsonl 2>/dev/null | wc -l) || SITIOS_FILES=0
         echo "  - DOF: $DOF_FILES archivos TXT"
         echo "  - ComprasMX: $COMPRAS_FILES archivos JSON"
         echo "  - Tianguis: $TIANGUIS_FILES archivos JSON"
+        echo "  - Sitios Masivos: $SITIOS_FILES archivos JSONL"
         ;;
         
     download)
@@ -545,11 +579,12 @@ case $COMMAND in
         source venv/bin/activate
         
         echo "Selecciona qué descargar:"
-        echo "1) Todo (ComprasMX, DOF, Tianguis)"
+        echo "1) Todo (ComprasMX, DOF, Tianguis, Sitios Masivos)"
         echo "2) Solo procesar archivos existentes (sin descargar)"
         echo "3) Solo ComprasMX"
         echo "4) Solo DOF"
         echo "5) Solo Tianguis Digital"
+        echo "6) Solo Sitios Masivos"
         echo -n "Opción: "
         read option
         
@@ -584,6 +619,10 @@ case $COMMAND in
             5)
                 print_info "Descargando Tianguis Digital..."
                 python src/etl.py --fuente tianguis
+                ;;
+            6)
+                print_info "Procesando Sitios Masivos..."
+                python src/etl.py --fuente sitios-masivos
                 ;;
             *)
                 print_error "Opción inválida"
@@ -627,7 +666,7 @@ case $COMMAND in
         fi
         
         echo ""
-        print_warning "ADVERTENCIA: Esto ELIMINARÁ TODOS los datos y recreará la tabla"
+        print_warning "ADVERTENCIA: Esto ELIMINARÁ TODOS los datos y recreará la tabla con el modelo híbrido"
         echo -n "¿Estás seguro? (escribe 'SI' para confirmar): "
         read confirmacion
         
@@ -639,11 +678,11 @@ case $COMMAND in
         print_info "Eliminando tabla antigua..."
         psql -h localhost -U postgres -d paloma_licitera -c "DROP TABLE IF EXISTS licitaciones CASCADE;" 2>/dev/null
         
-        print_info "Creando tabla con esquema correcto..."
+        print_info "Creando tabla con esquema híbrido correcto..."
         create_database_tables
         
         if [ $? -eq 0 ]; then
-            print_status "Base de datos recreada con esquema correcto"
+            print_status "Base de datos recreada con modelo híbrido"
             echo ""
             echo "Ahora puedes ejecutar:"
             echo "  ./paloma.sh download-quick  # Para procesar archivos existentes"
@@ -723,7 +762,7 @@ case $COMMAND in
         echo "GESTIÓN DE DATOS:"
         echo "  download          - Descarga datos de las fuentes"
         echo "  download-quick    - Solo procesa archivos existentes"
-        echo "  reset-db          - Elimina y recrea la BD con esquema correcto"
+        echo "  reset-db          - Elimina y recrea la BD con esquema híbrido"
         echo ""
         echo "FLUJO RECOMENDADO PARA INSTALACIÓN:"
         echo "  1. ./paloma.sh install        # Instala todo automáticamente"
@@ -732,7 +771,7 @@ case $COMMAND in
         echo ""
         echo "SI HAY PROBLEMAS:"
         echo "  ./paloma.sh doctor            # Diagnostica y arregla automáticamente"
-        echo "  ./paloma.sh reset-db          # Recrea BD con esquema correcto"
+        echo "  ./paloma.sh reset-db          # Recrea BD con esquema híbrido correcto"
         echo ""
         exit 1
         ;;
