@@ -200,7 +200,7 @@ class DOFTextParser:
         return None
     
     def extract_location(self, text: str) -> Dict[str, Optional[str]]:
-        """Extraer información de ubicación mejorada."""
+        """Extraer información de ubicación mejorada con manejo de errores."""
         location_info = {
             'localidad': None,
             'municipio': None,
@@ -208,22 +208,33 @@ class DOFTextParser:
             'ciudad': None
         }
         
-        # Patrones para ubicación
+        # Patrones para ubicación - corregidos con grupos de captura
         patterns = [
             (r'(?:localidad de\s+|localidad\s+)([^,\.]+)', 'localidad'),
             (r'(?:municipio de\s+|municipio\s+)([^,\.]+)', 'municipio'),
             (r'(?:estado de\s+|estado\s+)([^,\.]+)', 'estado'),
-            (r'SALTILLO,\s*COAHUILA', 'ciudad'),  # Caso específico
-            (r'CABO\s+SAN\s+LUCAS,\s*B', 'ciudad'),  # Caso específico
-            (r'([A-Z\s]+,\s*[A-Z\.]+)', 'ciudad'),  # Patrón general CIUDAD, ESTADO
+            (r'(SALTILLO),\s*(COAHUILA)', 'ciudad'),  # Caso específico
+            (r'(CABO\s+SAN\s+LUCAS),\s*(B[^,]*)', 'ciudad'),  # Caso específico
+            (r'([A-Z\s]{3,25}),\s*([A-Z\.]{2,15})', 'ciudad'),  # Patrón general CIUDAD, ESTADO
         ]
         
         for pattern, tipo in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                valor = match.group(1).strip()
-                if len(valor) > 2 and len(valor) < 50:  # Validar longitud razonable
-                    location_info[tipo] = valor
+            try:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    if match.lastindex == 1:  # Solo un grupo
+                        valor = match.group(1).strip()
+                    elif match.lastindex >= 2:  # Múltiples grupos (ciudad, estado)
+                        valor = f"{match.group(1).strip()}, {match.group(2).strip()}"
+                    else:
+                        continue
+                    
+                    if len(valor) > 2 and len(valor) < 100:  # Validar longitud razonable
+                        location_info[tipo] = valor
+            except (IndexError, AttributeError) as e:
+                # Si hay error en el patrón, continuar con el siguiente
+                print(f"Error en patrón de ubicación '{pattern}': {e}")
+                continue
         
         return location_info
     
@@ -255,7 +266,7 @@ class DOFTextParser:
         return titulo.strip()
     
     def extract_technical_info(self, text: str) -> Dict[str, Optional[str]]:
-        """Extraer información técnica del texto."""
+        """Extraer información técnica del texto con mejor validación."""
         info = {
             'volumen_obra': None,
             'cantidad': None,
@@ -280,11 +291,14 @@ class DOFTextParser:
                     info['volumen_obra'] = volumen_texto[:200]  # Limitar longitud
                     break
         
-        # Cantidad específica (ej: "134 pieza")
-        cantidad_match = re.search(r'(\d+)\s+(\w+)(?:\s|$)', text)
+        # Cantidad específica (ej: "134 pieza") - mejorado para evitar fechas
+        cantidad_match = re.search(r'(\d+)\s+(pieza|unidad|equipo|servicio|lote)(?:s)?\b', text, re.IGNORECASE)
         if cantidad_match:
-            info['cantidad'] = cantidad_match.group(1)
-            info['unidad'] = cantidad_match.group(2)
+            # Validar que no sea parte de una fecha
+            numero = int(cantidad_match.group(1))
+            if numero > 31 or numero < 2000:  # No es día ni año
+                info['cantidad'] = cantidad_match.group(1)
+                info['unidad'] = cantidad_match.group(2)
         
         # Detalles en convocatoria
         if re.search(r'(?:Los\s+)?[Dd]etalles\s+se\s+determinan\s+en\s+la\s+(?:propia\s+)?convocatoria', text, re.IGNORECASE):
@@ -364,7 +378,7 @@ class DOFTextParser:
 
 def main():
     """Función principal de pruebas."""
-    print("🔍 Iniciando análisis de texto del DOF (versión mejorada)...\n")
+    print("🔍 Iniciando análisis de texto del DOF (versión corregida)...\n")
     
     # Obtener muestras
     samples = get_dof_samples(5)
@@ -381,58 +395,63 @@ def main():
         print(f"MUESTRA {i} - ID: {sample['id']}")
         print(f"=" * 80)
         
-        resultado = parser.parse_licitacion(sample)
-        
-        print(f"📝 TÍTULO ORIGINAL:")
-        titulo_mostrar = resultado['titulo_original'][:150] + "..." if len(resultado['titulo_original']) > 150 else resultado['titulo_original']
-        print(f"   {titulo_mostrar}")
-        
-        print(f"\n🧹 TÍTULO SEPARADO:")
-        print(f"   {resultado['titulo_separado']}")
-        
-        if resultado['descripcion_extraida']:
-            print(f"\n📋 DESCRIPCIÓN EXTRAÍDA DEL TÍTULO:")
-            desc_mostrar = resultado['descripcion_extraida'][:200] + "..." if len(resultado['descripcion_extraida']) > 200 else resultado['descripcion_extraida']
-            print(f"   {desc_mostrar}")
-        
-        print(f"\n📅 FECHAS EXTRAÍDAS:")
-        if resultado['fechas_extraidas']:
-            for evento, fecha in resultado['fechas_extraidas'].items():
-                evento_display = evento.replace('_', ' ').title()
-                print(f"   {evento_display}: {fecha}")
-        else:
-            print("   ❌ No se encontraron fechas estructuradas")
-        
-        print(f"\n📍 UBICACIÓN:")
-        ubicacion = resultado['ubicacion']
-        if any(ubicacion.values()):
-            for key, value in ubicacion.items():
-                if value:
-                    print(f"   {key}: {value}")
-        else:
-            print("   ❌ No se encontró información de ubicación")
-        
-        print(f"\n🔧 INFO TÉCNICA:")
-        info_tec = resultado['info_tecnica']
-        if any(v for v in info_tec.values() if v is not None):
-            for key, value in info_tec.items():
-                if value is not None:
-                    if key == 'visita_requerida':
-                        print(f"   {key}: {'Sí' if value else 'No'}")
-                    else:
-                        valor_mostrar = str(value)[:100] + "..." if len(str(value)) > 100 else str(value)
-                        print(f"   {key}: {valor_mostrar}")
-        else:
-            print("   ❌ No se encontró información técnica")
-        
-        if resultado['descripcion_original']:
-            print(f"\n📋 DESCRIPCIÓN ORIGINAL (primeros 200 chars):")
-            desc_original = resultado['descripcion_original'][:200] + "..." if len(resultado['descripcion_original']) > 200 else resultado['descripcion_original']
-            print(f"   {desc_original}")
-        else:
-            print(f"\n📋 DESCRIPCIÓN ORIGINAL: ❌ No disponible")
-        
-        print("\n")
+        try:
+            resultado = parser.parse_licitacion(sample)
+            
+            print(f"📝 TÍTULO ORIGINAL:")
+            titulo_mostrar = resultado['titulo_original'][:150] + "..." if len(resultado['titulo_original']) > 150 else resultado['titulo_original']
+            print(f"   {titulo_mostrar}")
+            
+            print(f"\n🧹 TÍTULO SEPARADO:")
+            print(f"   {resultado['titulo_separado']}")
+            
+            if resultado['descripcion_extraida']:
+                print(f"\n📋 DESCRIPCIÓN EXTRAÍDA DEL TÍTULO:")
+                desc_mostrar = resultado['descripcion_extraida'][:200] + "..." if len(resultado['descripcion_extraida']) > 200 else resultado['descripcion_extraida']
+                print(f"   {desc_mostrar}")
+            
+            print(f"\n📅 FECHAS EXTRAÍDAS:")
+            if resultado['fechas_extraidas']:
+                for evento, fecha in resultado['fechas_extraidas'].items():
+                    evento_display = evento.replace('_', ' ').title()
+                    print(f"   {evento_display}: {fecha}")
+            else:
+                print("   ❌ No se encontraron fechas estructuradas")
+            
+            print(f"\n📍 UBICACIÓN:")
+            ubicacion = resultado['ubicacion']
+            if any(ubicacion.values()):
+                for key, value in ubicacion.items():
+                    if value:
+                        print(f"   {key}: {value}")
+            else:
+                print("   ❌ No se encontró información de ubicación")
+            
+            print(f"\n🔧 INFO TÉCNICA:")
+            info_tec = resultado['info_tecnica']
+            if any(v for v in info_tec.values() if v is not None):
+                for key, value in info_tec.items():
+                    if value is not None:
+                        if key == 'visita_requerida':
+                            print(f"   {key}: {'Sí' if value else 'No'}")
+                        else:
+                            valor_mostrar = str(value)[:100] + "..." if len(str(value)) > 100 else str(value)
+                            print(f"   {key}: {valor_mostrar}")
+            else:
+                print("   ❌ No se encontró información técnica")
+            
+            if resultado['descripcion_original']:
+                print(f"\n📋 DESCRIPCIÓN ORIGINAL (primeros 200 chars):")
+                desc_original = resultado['descripcion_original'][:200] + "..." if len(resultado['descripcion_original']) > 200 else resultado['descripcion_original']
+                print(f"   {desc_original}")
+            else:
+                print(f"\n📋 DESCRIPCIÓN ORIGINAL: ❌ No disponible")
+            
+            print("\n")
+            
+        except Exception as e:
+            print(f"❌ Error procesando muestra {i}: {e}")
+            print("   Continuando con la siguiente muestra...\n")
 
 if __name__ == "__main__":
     main()
