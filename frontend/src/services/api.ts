@@ -4,11 +4,14 @@ import {
   LicitacionesResponse,
   Statistics,
   Filtros,
+  FiltrosGeograficos,
   SearchFilters,
   AnalisisContratacion,
   AnalisisDependencia,
   AnalisisFuente,
-  AnalisisTemporal
+  AnalisisTemporal,
+  AnalisisEstado,
+  AnalisisGeografico
 } from '../types';
 
 // Configure axios base URL - use proxy in development, direct in production
@@ -149,6 +152,16 @@ export const apiService = {
     }
   },
 
+  // Get geographic filters (NEW)
+  async getFiltrosGeograficos(): Promise<FiltrosGeograficos> {
+    try {
+      const response = await api.get('/filtros-geograficos');
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.userMessage || error.message);
+    }
+  },
+
   // Quick search for autocomplete
   async quickSearch(query: string, limit: number = 10) {
     try {
@@ -171,11 +184,13 @@ export const apiService = {
     }
   },
 
-  async getAnalisisPorDependencia(limit: number = 20): Promise<AnalisisDependencia[]> {
+  async getAnalisisPorDependencia(limit: number = 20, entidad_federativa?: string): Promise<AnalisisDependencia[]> {
     try {
-      const response = await api.get('/analisis/por-dependencia', {
-        params: { limit }
-      });
+      const params: any = { limit };
+      if (entidad_federativa) {
+        params.entidad_federativa = entidad_federativa;
+      }
+      const response = await api.get('/analisis/por-dependencia', { params });
       return response.data;
     } catch (error: any) {
       throw new Error(error.userMessage || error.message);
@@ -191,11 +206,37 @@ export const apiService = {
     }
   },
 
-  async getAnalisisTemporal(granularidad: 'dia' | 'semana' | 'mes' | 'año' = 'mes'): Promise<AnalisisTemporal[]> {
+  // Análisis por estado (NEW)
+  async getAnalisisPorEstado(): Promise<AnalisisEstado[]> {
     try {
-      const response = await api.get('/analisis/temporal', {
-        params: { granularidad }
-      });
+      const response = await api.get('/analisis/por-estado');
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.userMessage || error.message);
+    }
+  },
+
+  // Análisis geográfico (NEW)
+  async getAnalisisGeografico(entidad_federativa?: string): Promise<AnalisisGeografico> {
+    try {
+      const params = entidad_federativa ? { entidad_federativa } : {};
+      const response = await api.get('/analisis/geografico', { params });
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.userMessage || error.message);
+    }
+  },
+
+  async getAnalisisTemporal(
+    granularidad: 'dia' | 'semana' | 'mes' | 'año' = 'mes',
+    entidad_federativa?: string
+  ): Promise<AnalisisTemporal[]> {
+    try {
+      const params: any = { granularidad };
+      if (entidad_federativa) {
+        params.entidad_federativa = entidad_federativa;
+      }
+      const response = await api.get('/analisis/temporal', { params });
       return response.data;
     } catch (error: any) {
       throw new Error(error.userMessage || error.message);
