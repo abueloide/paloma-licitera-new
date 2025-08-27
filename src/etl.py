@@ -3,6 +3,7 @@
 """
 Orquestador ETL Principal - Paloma Licitera
 Integra scrapers de etl-process/extractors/ como fuentes principales
+Incluye el parser DOF mejorado con extracción de ubicación geográfica
 """
 
 import logging
@@ -23,6 +24,7 @@ from database import Database
 from extractors.base import BaseExtractor
 from extractors.comprasmx import ComprasMXExtractor
 from extractors.dof import DOFExtractor
+from extractors.dof_mejorado import DOFMejoradoExtractor  # NUEVO: Extractor mejorado
 from extractors.tianguis import TianguisExtractor
 from extractors.zip_processor import ZipProcessor
 
@@ -56,24 +58,35 @@ class ETL:
             processors['comprasmx'] = ComprasMXExtractor(self.config)
             
         if self.config['sources']['dof']['enabled']:
-            processors['dof'] = DOFExtractor(self.config)
+            # NUEVO: Usar extractor DOF mejorado si está disponible
+            try:
+                processors['dof'] = DOFMejoradoExtractor(self.config)
+                logger.info("✅ Usando extractor DOF MEJORADO con parser de ubicación geográfica")
+            except Exception as e:
+                logger.warning(f"⚠️ No se pudo cargar extractor DOF mejorado: {e}")
+                logger.info("📋 Usando extractor DOF estándar")
+                processors['dof'] = DOFExtractor(self.config)
             
         if self.config['sources']['tianguis']['enabled']:
             processors['tianguis'] = TianguisExtractor(self.config)
             
         return processors
     
-    def ejecutar(self, fuente: str = 'all', solo_procesamiento: bool = False) -> Dict:
+    def ejecutar(self, fuente: str = 'all', solo_procesamiento: bool = False, 
+                 usar_parser_mejorado: bool = True) -> Dict:
         """
         Ejecutar ETL completo: scraping + procesamiento + carga.
         
         Args:
             fuente: 'all', 'comprasmx', 'dof', 'tianguis', 'zip'
             solo_procesamiento: Si True, omite la fase de scraping
+            usar_parser_mejorado: Si True, usa el parser DOF mejorado (default: True)
         """
-        logger.info(f"Iniciando ETL para: {fuente}")
+        logger.info(f"🚀 Iniciando ETL para: {fuente}")
         if solo_procesamiento:
             logger.info("🚫 MODO SOLO PROCESAMIENTO - Omitiendo scrapers")
+        if usar_parser_mejorado and fuente in ['all', 'dof']:
+            logger.info("🔍 Parser DOF mejorado ACTIVADO - Extracción de ubicación geográfica")
         
         resultados = {
             'inicio': datetime.now(),
@@ -84,9 +97,9 @@ class ETL:
         # 1. FASE DE SCRAPING - Solo si no es solo procesamiento
         if not solo_procesamiento:
             if fuente == 'all':
-                self._ejecutar_todos_scrapers(resultados)
+                self._ejecutar_todos_scrapers(resultados, usar_parser_mejorado)
             else:
-                self._ejecutar_scraper(fuente, resultados)
+                self._ejecutar_scraper(fuente, resultados, usar_parser_mejorado)
         else:
             logger.info("⏭️ Saltando fase de scraping...")
         
@@ -97,13 +110,17 @@ class ETL:
         if fuente in ['all', 'zip']:
             self._procesar_zips(resultados)
         
+        # 4. Mostrar estadísticas de ubicación si es DOF mejorado
+        if usar_parser_mejorado and fuente in ['all', 'dof']:
+            self._mostrar_estadisticas_geograficas()
+        
         resultados['fin'] = datetime.now()
         resultados['duracion'] = str(resultados['fin'] - resultados['inicio'])
         
-        logger.info(f"ETL terminado: {resultados['totales']}")
+        logger.info(f"✅ ETL terminado: {resultados['totales']}")
         return resultados
     
-    def _ejecutar_todos_scrapers(self, resultados: Dict):
+    def _ejecutar_todos_scrapers(self, resultados: Dict, usar_parser_mejorado: bool = True):
         """Ejecutar todos los scrapers disponibles en orden de prioridad."""
         # ORDEN DE PRIORIDAD:
         # 1. ComprasMX (máxima prioridad) - Portal Federal de Compras
@@ -114,7 +131,7 @@ class ETL:
         for scraper in scrapers:
             if self._scraper_habilitado(scraper):
                 logger.info(f"🎯 Ejecutando scraper prioritario: {scraper}")
-                self._ejecutar_scraper(scraper, resultados)
+                self._ejecutar_scraper(scraper, resultados, usar_parser_mejorado)
     
     def _scraper_habilitado(self, scraper: str) -> bool:
         """Verificar si un scraper está habilitado en la configuración."""
@@ -125,7 +142,7 @@ class ETL:
         }
         return config_map.get(scraper, False)
     
-    def _ejecutar_scraper(self, fuente: str, resultados: Dict):
+    def _ejecutar_scraper(self, fuente: str, resultados: Dict, usar_parser_mejorado: bool = True):
         """Ejecutar un scraper específico."""
         logger.info(f"🕷️ Ejecutando scraper: {fuente}")
         
@@ -139,7 +156,10 @@ class ETL:
             if fuente == 'comprasmx':
                 self._ejecutar_comprasmx_scraper(resultado_scraping)
             elif fuente == 'dof':
-                self._ejecutar_dof_scraper(resultado_scraping)
+                if usar_parser_mejorado:
+                    self._ejecutar_dof_scraper_mejorado(resultado_scraping)
+                else:
+                    self._ejecutar_dof_scraper(resultado_scraping)
             elif fuente == 'tianguis':
                 self._ejecutar_tianguis_scraper(resultado_scraping)
                 
@@ -177,8 +197,52 @@ class ETL:
             logger.warning(f"Scraper no encontrado: {scraper_path}")
             resultado['error_scraping'] = f"Scraper no encontrado: {scraper_path}"
     
+    def _ejecutar_dof_scraper_mejorado(self, resultado: Dict):
+        """
+        Ejecutar scraper del DOF con parser mejorado.
+        Procesa TXTs existentes con extracción de ubicación geográfica.
+        """
+        logger.info("🔍 Ejecutando procesamiento DOF MEJORADO...")
+        
+        # Usar el procesador mejorado directamente
+        procesar_script = Path(__file__).parent / "parsers" / "dof" / "procesar_dof_mejorado.py"
+        
+        if procesar_script.exists():
+            logger.info("📝 Procesando archivos TXT con parser mejorado...")
+            
+            # Directorio con archivos TXT
+            dof_dir = self.data_dir / "dof"
+            
+            if dof_dir.exists():
+                process = subprocess.run([
+                    sys.executable, str(procesar_script), str(dof_dir)
+                ], capture_output=True, text=True)
+                
+                if process.returncode == 0:
+                    resultado['scraping_exitoso'] = True
+                    logger.info("✅ Parser DOF mejorado ejecutado exitosamente")
+                    
+                    # Contar JSONs mejorados generados
+                    json_files = list(dof_dir.glob("*_mejorado.json"))
+                    resultado['archivos_generados'] = len(json_files)
+                    logger.info(f"📁 JSONs mejorados generados: {len(json_files)}")
+                    
+                    # Mostrar estadísticas de ubicación
+                    self._analizar_ubicaciones_dof(json_files)
+                else:
+                    logger.error(f"❌ Error en parser DOF mejorado: {process.stderr}")
+                    # Si falla, intentar con el parser estándar
+                    logger.info("⚠️ Intentando con parser DOF estándar...")
+                    self._ejecutar_dof_scraper(resultado)
+            else:
+                logger.warning(f"No existe el directorio {dof_dir}")
+                resultado['error_scraping'] = f"Directorio no encontrado: {dof_dir}"
+        else:
+            logger.warning("Parser mejorado no encontrado, usando estándar")
+            self._ejecutar_dof_scraper(resultado)
+    
     def _ejecutar_dof_scraper(self, resultado: Dict):
-        """Ejecutar scraper del DOF - COMPLETO con procesamiento."""
+        """Ejecutar scraper del DOF - COMPLETO con procesamiento estándar."""
         # Paso 1: Descargar PDFs
         scraper_path = self.scrapers_dir / "dof" / "dof_extraccion_estructuracion.py"
         
@@ -292,7 +356,8 @@ class ETL:
         resultado = {
             'extraidos': 0,
             'insertados': 0,
-            'errores': 0
+            'errores': 0,
+            'con_ubicacion': 0  # NUEVO: Contador de licitaciones con ubicación
         }
         
         try:
@@ -304,6 +369,10 @@ class ETL:
             # Insertar en BD
             for licitacion in licitaciones:
                 try:
+                    # Contar licitaciones con ubicación geográfica
+                    if licitacion.get('entidad_federativa'):
+                        resultado['con_ubicacion'] += 1
+                    
                     if self.db.insertar_licitacion(licitacion):
                         resultado['insertados'] += 1
                 except Exception as e:
@@ -311,6 +380,10 @@ class ETL:
                     resultado['errores'] += 1
             
             logger.info(f"   💾 Insertadas {resultado['insertados']} licitaciones en BD")
+            
+            # Mostrar estadísticas de ubicación si es DOF
+            if nombre_fuente == 'dof' and resultado['con_ubicacion'] > 0:
+                logger.info(f"   🗺️ Con ubicación geográfica: {resultado['con_ubicacion']}/{resultado['extraidos']}")
                     
         except Exception as e:
             logger.error(f"Error procesando {nombre_fuente}: {e}")
@@ -352,12 +425,56 @@ class ETL:
         resultados['totales']['extraidos'] += resultado_zip['extraidos']
         resultados['totales']['insertados'] += resultado_zip['insertados']
         resultados['totales']['errores'] += resultado_zip['errores']
+    
+    def _analizar_ubicaciones_dof(self, json_files: List[Path]):
+        """Analizar y mostrar estadísticas de ubicación de JSONs DOF mejorados."""
+        total_con_estado = 0
+        total_con_municipio = 0
+        estados_contador = {}
+        
+        for json_file in json_files:
+            try:
+                with open(json_file, 'r', encoding='utf-8') as f:
+                    datos = json.load(f)
+                
+                for lic in datos.get('licitaciones', []):
+                    if lic.get('entidad_federativa'):
+                        total_con_estado += 1
+                        estado = lic['entidad_federativa']
+                        estados_contador[estado] = estados_contador.get(estado, 0) + 1
+                    if lic.get('municipio'):
+                        total_con_municipio += 1
+            except:
+                pass
+        
+        if total_con_estado > 0:
+            logger.info(f"🗺️ Estadísticas de ubicación DOF:")
+            logger.info(f"   • Con entidad federativa: {total_con_estado}")
+            logger.info(f"   • Con municipio: {total_con_municipio}")
+            
+            # Top 3 estados
+            if estados_contador:
+                top_estados = sorted(estados_contador.items(), key=lambda x: x[1], reverse=True)[:3]
+                logger.info(f"   • Top estados: {', '.join([f'{e[0]} ({e[1]})' for e in top_estados])}")
+    
+    def _mostrar_estadisticas_geograficas(self):
+        """Mostrar estadísticas geográficas de la BD."""
+        try:
+            stats = self.db.obtener_estadisticas()
+            
+            if stats.get('por_entidad_federativa'):
+                logger.info("\n🗺️ DISTRIBUCIÓN GEOGRÁFICA (DOF):")
+                for entidad, cantidad in list(stats['por_entidad_federativa'].items())[:5]:
+                    logger.info(f"   • {entidad}: {cantidad} licitaciones")
+        except Exception as e:
+            logger.debug(f"No se pudieron obtener estadísticas geográficas: {e}")
+
 
 def main():
     """Función principal."""
     import argparse
     
-    parser = argparse.ArgumentParser(description='ETL Paloma Licitera')
+    parser = argparse.ArgumentParser(description='ETL Paloma Licitera con Parser DOF Mejorado')
     parser.add_argument(
         '--fuente',
         choices=['all', 'comprasmx', 'dof', 'tianguis', 'zip'],
@@ -374,6 +491,11 @@ def main():
         action='store_true',
         help='Solo procesar archivos existentes, sin ejecutar scrapers'
     )
+    parser.add_argument(
+        '--parser-estandar',
+        action='store_true',
+        help='Usar parser DOF estándar en lugar del mejorado'
+    )
     
     args = parser.parse_args()
     
@@ -383,7 +505,15 @@ def main():
         etl.db.setup()
         print("✅ Base de datos configurada")
     else:
-        resultados = etl.ejecutar(args.fuente, solo_procesamiento=getattr(args, 'solo_procesamiento', False))
+        # Determinar si usar parser mejorado
+        usar_parser_mejorado = not args.parser_estandar
+        
+        resultados = etl.ejecutar(
+            args.fuente, 
+            solo_procesamiento=args.solo_procesamiento,
+            usar_parser_mejorado=usar_parser_mejorado
+        )
+        
         print(f"""
 🎯 ETL Completado
 ═══════════════
@@ -392,6 +522,14 @@ def main():
 ❌ Errores: {resultados['totales']['errores']}
 ⏱️ Duración: {resultados['duracion']}
         """)
+        
+        # Mostrar información adicional si se usó parser mejorado
+        if usar_parser_mejorado and args.fuente in ['all', 'dof']:
+            if 'dof_procesamiento' in resultados['fuentes']:
+                dof_stats = resultados['fuentes']['dof_procesamiento']
+                if dof_stats.get('con_ubicacion', 0) > 0:
+                    print(f"🗺️ Licitaciones DOF con ubicación: {dof_stats['con_ubicacion']}/{dof_stats['extraidos']}")
+
 
 if __name__ == "__main__":
     main()
