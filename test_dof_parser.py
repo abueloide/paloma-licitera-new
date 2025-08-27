@@ -68,53 +68,71 @@ class DOFTextParser:
     """Parser mejorado para textos del DOF."""
     
     def __init__(self):
-        # Patrones mejorados para fechas en formato DD/MM/YYYY y DD/MM/YYYY, a las HH:MM
-        self.fecha_patterns = [
-            r'(\d{1,2})/(\d{1,2})/(\d{4}),?\s*a?\s*las?\s*(\d{1,2}):(\d{2})',  # 20/08/2025, a las 10:00
-            r'(\d{1,2})/(\d{1,2})/(\d{4})',  # 14/08/2025
-            r'(\d{1,2})\s+DE\s+([A-Z]+)\s+DE\s+(\d{4})\s+(\d{1,2}):(\d{2})\s+HORAS?',  # 12 DE AGOSTO DE 2025 11:00 HORAS
-            r'(\d{1,2})\s+DE\s+([A-Z]+)\s+DE\s+(\d{4})',  # 12 DE AGOSTO DE 2025
-        ]
-        
+        # Meses en español
         self.meses = {
             'ENERO': 1, 'FEBRERO': 2, 'MARZO': 3, 'ABRIL': 4,
             'MAYO': 5, 'JUNIO': 6, 'JULIO': 7, 'AGOSTO': 8,
             'SEPTIEMBRE': 9, 'OCTUBRE': 10, 'NOVIEMBRE': 11, 'DICIEMBRE': 12
         }
         
-        # Patrones mejorados para el formato actual
+        # Patrones mejorados para cubrir TODOS los formatos encontrados
         self.evento_patterns = {
-            'fecha_publicacion_compranet': r'Fecha\s+de\s+publicación\s+en\s+Compranet\s+(\d{1,2}/\d{1,2}/\d{4})',
-            'junta_aclaraciones': r'Junta\s+de\s+aclaraciones\s+(\d{1,2}/\d{1,2}/\d{4},?\s*a?\s*las?\s*\d{1,2}:\d{2})',
-            'presentacion_apertura': r'Presentación\s+y\s+apertura\s+de\s+proposiciones\s+(\d{1,2}/\d{1,2}/\d{4},?\s*a?\s*las?\s*\d{1,2}:\d{2})',
-            'fallo': r'Fallo\s+(\d{1,2}/\d{1,2}/\d{4},?\s*a?\s*las?\s*\d{1,2}:\d{2})',
-            'visita_sitio': r'Visita\s+al\s+sitio\s+(?:de\s+los\s+trabajos?\s+)?(\d{1,2}/\d{1,2}/\d{4}(?:,?\s*a?\s*las?\s*\d{1,2}:\d{2})?|No\s+habrá\s+visita)'
+            'fecha_publicacion_compranet': [
+                r'Fecha\s+de\s+publicación\s+en\s+Compranet\s+(\d{1,2}/\d{1,2}/\d{4})',
+                r'Fecha\s+de\s+publicación\s+en\s+CompraNet\s+(\d{1,2}/\d{1,2}/\d{4})',
+                r'Fecha\s+de\s+publicación\s+en\s+Compras?\s+MX\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})',
+                r'Fecha\s+de\s+publicación\s+en\s+Compras?\s+MX\s+(\d{1,2}/\w+/\d{4})',
+            ],
+            'junta_aclaraciones': [
+                r'Junta\s+de\s+aclaraciones\s+(\d{1,2}/\d{1,2}/\d{4}(?:,?\s*a?\s*las?\s*\d{1,2}:\d{2})?)',
+                r'Junta\s+de\s+aclaraciones\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4}(?:,?\s*a?\s*las?\s*\d{1,2}:\d{2})?)',
+                r'Junta\s+de\s+Aclaraciones\s+(\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2})',
+                r'Junta\s+de\s+aclaraciones\s+(\d{1,2}/\w+/\d{4}\s+\d{1,2}:\d{2})',
+            ],
+            'presentacion_apertura': [
+                r'Presentación\s+y\s+apertura\s+de\s+proposiciones\s+(\d{1,2}/\d{1,2}/\d{4}(?:,?\s*a?\s*las?\s*\d{1,2}:\d{2})?)',
+                r'Acto\s+de\s+presentación\s+y\s+apertura\s+de\s+proposiciones\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4}(?:,?\s*a?\s*las?\s*\d{1,2}:\d{2})?)',
+                r'Presentación\s+y\s+[Aa]pertura\s+de\s+[Pp]roposiciones\s+(\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2})',
+            ],
+            'fallo': [
+                r'Fallo\s+(\d{1,2}/\d{1,2}/\d{4}(?:,?\s*a?\s*las?\s*\d{1,2}:\d{2})?)',
+                r'Fallo\s+(\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2})',
+                r'Emisión\s+del\s+Fallo\s+(\d{1,2}\s+DE\s+\w+(?:\s+DE\s+\d{4})?)',
+            ],
+            'visita_sitio': [
+                r'Visita\s+al\s+sitio\s+(?:de\s+los\s+trabajos?\s+)?(\d{1,2}/\d{1,2}/\d{4}(?:,?\s*a?\s*las?\s*\d{1,2}:\d{2})?|No\s+habrá\s+visita)',
+                r'Visita\s+al\s+sitio\s+(?:de\s+los\s+trabajos?\s+)?(\d{1,2}\s+de\s+\w+\s+de\s+\d{4}(?:,?\s*a?\s*las?\s*\d{1,2}:\d{2})?)',
+            ]
         }
     
     def extract_dates_from_text(self, text: str) -> Dict[str, str]:
-        """Extraer fechas específicas del texto."""
+        """Extraer fechas específicas del texto con múltiples patrones."""
         fechas_encontradas = {}
         
-        # Buscar cada tipo de evento
-        for evento, pattern in self.evento_patterns.items():
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                fecha_texto = match.group(1)
-                if "No habrá" in fecha_texto:
-                    fechas_encontradas[evento] = "No aplica"
-                else:
-                    fecha_normalizada = self.normalize_date(fecha_texto)
-                    if fecha_normalizada:
-                        fechas_encontradas[evento] = fecha_normalizada
+        # Buscar cada tipo de evento con múltiples patrones
+        for evento, patterns in self.evento_patterns.items():
+            for pattern in patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    fecha_texto = match.group(1)
+                    if "No habrá" in fecha_texto:
+                        fechas_encontradas[evento] = "No aplica"
                     else:
-                        fechas_encontradas[evento] = fecha_texto  # Guardar original si no se puede normalizar
+                        fecha_normalizada = self.normalize_date(fecha_texto)
+                        if fecha_normalizada:
+                            fechas_encontradas[evento] = fecha_normalizada
+                            break  # Solo tomar la primera coincidencia válida
+                        else:
+                            fechas_encontradas[evento] = f"Original: {fecha_texto}"
         
         return fechas_encontradas
     
     def normalize_date(self, fecha_texto: str) -> Optional[str]:
-        """Normalizar fecha a formato ISO."""
-        # Patrón: "20/08/2025, a las 10:00"
-        match = re.match(r'(\d{1,2})/(\d{1,2})/(\d{4})(?:,?\s*a?\s*las?\s*(\d{1,2}):(\d{2}))?', fecha_texto)
+        """Normalizar fecha a formato ISO con múltiples patrones."""
+        fecha_texto = fecha_texto.strip()
+        
+        # Patrón 1: "20/08/2025, a las 10:00" o "20/08/2025 10:00"
+        match = re.match(r'(\d{1,2})/(\d{1,2})/(\d{4})(?:,?\s*(?:a?\s*las?\s*)?(\d{1,2}):(\d{2})(?:\s*horas?)?)?', fecha_texto, re.IGNORECASE)
         if match:
             dia = int(match.group(1))
             mes = int(match.group(2))
@@ -128,11 +146,45 @@ class DOFTextParser:
             except ValueError:
                 pass
         
-        # Patrón: "12 DE AGOSTO DE 2025 11:00 HORAS"
-        match = re.match(r'(\d{1,2})\s+DE\s+([A-Z]+)\s+(?:DE\s+)?(\d{4})(?:\s+(\d{1,2}):(\d{2}))?', fecha_texto.upper())
+        # Patrón 2: "12 de agosto de 2025, a las 10:00"
+        match = re.match(r'(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})(?:,?\s*(?:a?\s*las?\s*)?(\d{1,2}):(\d{2})(?:\s*horas?)?)?', fecha_texto, re.IGNORECASE)
         if match:
             dia = int(match.group(1))
-            mes_texto = match.group(2)
+            mes_texto = match.group(2).upper()
+            año = int(match.group(3))
+            hora = int(match.group(4)) if match.group(4) else 0
+            minuto = int(match.group(5)) if match.group(5) else 0
+            
+            if mes_texto in self.meses:
+                mes = self.meses[mes_texto]
+                try:
+                    fecha = datetime(año, mes, dia, hora, minuto)
+                    return fecha.strftime('%Y-%m-%d %H:%M:%S')
+                except ValueError:
+                    pass
+        
+        # Patrón 3: "14/agosto/2025 11:00 hrs"
+        match = re.match(r'(\d{1,2})/(\w+)/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?:\s*hrs?\.?)?)?', fecha_texto, re.IGNORECASE)
+        if match:
+            dia = int(match.group(1))
+            mes_texto = match.group(2).upper()
+            año = int(match.group(3))
+            hora = int(match.group(4)) if match.group(4) else 0
+            minuto = int(match.group(5)) if match.group(5) else 0
+            
+            if mes_texto in self.meses:
+                mes = self.meses[mes_texto]
+                try:
+                    fecha = datetime(año, mes, dia, hora, minuto)
+                    return fecha.strftime('%Y-%m-%d %H:%M:%S')
+                except ValueError:
+                    pass
+        
+        # Patrón 4: "12 DE AGOSTO DE 2025 11:00 HORAS"
+        match = re.match(r'(\d{1,2})\s+DE\s+(\w+)\s+(?:DE\s+)?(\d{4})(?:\s+(\d{1,2}):(\d{2})(?:\s*HORAS?)?)?', fecha_texto.upper())
+        if match:
+            dia = int(match.group(1))
+            mes_texto = match.group(2).upper()
             año = int(match.group(3))
             hora = int(match.group(4)) if match.group(4) else 0
             minuto = int(match.group(5)) if match.group(5) else 0
@@ -148,29 +200,30 @@ class DOFTextParser:
         return None
     
     def extract_location(self, text: str) -> Dict[str, Optional[str]]:
-        """Extraer información de ubicación."""
+        """Extraer información de ubicación mejorada."""
         location_info = {
             'localidad': None,
             'municipio': None,
-            'estado': None
+            'estado': None,
+            'ciudad': None
         }
         
         # Patrones para ubicación
-        localidad_pattern = r'(?:localidad de\s+|localidad\s+)([^,\.]+)'
-        municipio_pattern = r'(?:municipio de\s+|municipio\s+)([^,\.]+)'
-        estado_pattern = r'(?:estado de\s+|estado\s+)([^,\.]+)'
+        patterns = [
+            (r'(?:localidad de\s+|localidad\s+)([^,\.]+)', 'localidad'),
+            (r'(?:municipio de\s+|municipio\s+)([^,\.]+)', 'municipio'),
+            (r'(?:estado de\s+|estado\s+)([^,\.]+)', 'estado'),
+            (r'SALTILLO,\s*COAHUILA', 'ciudad'),  # Caso específico
+            (r'CABO\s+SAN\s+LUCAS,\s*B', 'ciudad'),  # Caso específico
+            (r'([A-Z\s]+,\s*[A-Z\.]+)', 'ciudad'),  # Patrón general CIUDAD, ESTADO
+        ]
         
-        localidad_match = re.search(localidad_pattern, text, re.IGNORECASE)
-        if localidad_match:
-            location_info['localidad'] = localidad_match.group(1).strip()
-        
-        municipio_match = re.search(municipio_pattern, text, re.IGNORECASE)
-        if municipio_match:
-            location_info['municipio'] = municipio_match.group(1).strip()
-        
-        estado_match = re.search(estado_pattern, text, re.IGNORECASE)
-        if estado_match:
-            location_info['estado'] = estado_match.group(1).strip()
+        for pattern, tipo in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                valor = match.group(1).strip()
+                if len(valor) > 2 and len(valor) < 50:  # Validar longitud razonable
+                    location_info[tipo] = valor
         
         return location_info
     
@@ -189,7 +242,12 @@ class DOFTextParser:
             titulo = partes[0].strip()
         
         # Otros separadores comunes
-        for separator in [' Los detalles', ' Fecha de publicación', ' Visita al sitio']:
+        separators = [
+            ' Los detalles', ' Fecha de publicación', ' Visita al sitio',
+            'Volumen de licitación', 'Volumen a adquirir'
+        ]
+        
+        for separator in separators:
             if separator in titulo:
                 titulo = titulo.split(separator)[0].strip()
                 break
@@ -200,27 +258,51 @@ class DOFTextParser:
         """Extraer información técnica del texto."""
         info = {
             'volumen_obra': None,
+            'cantidad': None,
+            'unidad': None,
             'especificaciones': None,
             'detalles_convocatoria': None,
-            'visita_requerida': None
+            'visita_requerida': None,
+            'caracter_procedimiento': None
         }
         
-        # Volumen de obra
-        volumen_match = re.search(r'Volumen\s+a?\s*\w*\s*(.*?)(?:Los\s+detalles|Fecha\s+de|$)', text, re.IGNORECASE | re.DOTALL)
-        if volumen_match:
-            volumen_texto = volumen_match.group(1).strip()
-            if volumen_texto and len(volumen_texto) > 5:
-                info['volumen_obra'] = volumen_texto[:200]  # Limitar longitud
+        # Volumen de obra - mejorado
+        volumen_patterns = [
+            r'Volumen\s+a?\s*\w*\s*(.*?)(?:Los\s+detalles|Fecha\s+de|$)',
+            r'Volumen\s+de\s+(?:la\s+)?(?:obra|licitación)\s+(.*?)(?:Fecha\s+de|$)',
+        ]
+        
+        for pattern in volumen_patterns:
+            match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+            if match:
+                volumen_texto = match.group(1).strip()
+                if volumen_texto and len(volumen_texto) > 3:
+                    info['volumen_obra'] = volumen_texto[:200]  # Limitar longitud
+                    break
+        
+        # Cantidad específica (ej: "134 pieza")
+        cantidad_match = re.search(r'(\d+)\s+(\w+)(?:\s|$)', text)
+        if cantidad_match:
+            info['cantidad'] = cantidad_match.group(1)
+            info['unidad'] = cantidad_match.group(2)
         
         # Detalles en convocatoria
-        if re.search(r'Los\s+detalles\s+se\s+determinan\s+en\s+la\s+(?:propia\s+)?convocatoria', text, re.IGNORECASE):
+        if re.search(r'(?:Los\s+)?[Dd]etalles\s+se\s+determinan\s+en\s+la\s+(?:propia\s+)?convocatoria', text, re.IGNORECASE):
             info['detalles_convocatoria'] = "Los detalles se determinan en la convocatoria"
+        elif re.search(r'Se\s+(?:detalla|determinan?)\s+en\s+la\s+[Cc]onvocatoria', text, re.IGNORECASE):
+            info['detalles_convocatoria'] = "Se detalla en la Convocatoria"
         
         # Visita al sitio
         if re.search(r'No\s+habrá\s+visita\s+al\s+sitio', text, re.IGNORECASE):
             info['visita_requerida'] = False
         elif re.search(r'Visita\s+al\s+sitio', text, re.IGNORECASE):
             info['visita_requerida'] = True
+        
+        # Carácter del procedimiento
+        if re.search(r'carácter\s+Internacional', text, re.IGNORECASE):
+            info['caracter_procedimiento'] = "Internacional"
+        elif re.search(r'Nacional', text, re.IGNORECASE):
+            info['caracter_procedimiento'] = "Nacional"
         
         return info
     
@@ -229,11 +311,13 @@ class DOFTextParser:
         if not titulo:
             return "", ""
         
-        # Buscar puntos de corte comunes
+        # Buscar puntos de corte comunes - ordenados por prioridad
         separators = [
             "Volumen a adquirir",
             "Volumen de la obra",
+            "Volumen de licitación",
             "Los detalles se determinan",
+            "Se detalla en la Convocatoria",
             "Fecha de publicación",
             "Visita al sitio"
         ]
@@ -280,7 +364,7 @@ class DOFTextParser:
 
 def main():
     """Función principal de pruebas."""
-    print("🔍 Iniciando análisis de texto del DOF...\n")
+    print("🔍 Iniciando análisis de texto del DOF (versión mejorada)...\n")
     
     # Obtener muestras
     samples = get_dof_samples(5)
@@ -314,7 +398,8 @@ def main():
         print(f"\n📅 FECHAS EXTRAÍDAS:")
         if resultado['fechas_extraidas']:
             for evento, fecha in resultado['fechas_extraidas'].items():
-                print(f"   {evento.replace('_', ' ').title()}: {fecha}")
+                evento_display = evento.replace('_', ' ').title()
+                print(f"   {evento_display}: {fecha}")
         else:
             print("   ❌ No se encontraron fechas estructuradas")
         
