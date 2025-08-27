@@ -7,12 +7,15 @@ import {
   ChevronRight,
   AlertCircle,
   Loader2,
-  Eye
+  Eye,
+  MapPin,
+  Building2
 } from 'lucide-react';
 import { LicitacionesResponse, Filtros, SearchFilters } from '../types';
 import { apiService } from '../services/api';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import GeographicFilters from '../components/GeographicFilters';
 
 const Licitaciones: React.FC = () => {
   const navigate = useNavigate();
@@ -57,6 +60,14 @@ const Licitaciones: React.FC = () => {
     }));
   };
 
+  const handleGeographicFilterChange = (filters: { entidad_federativa?: string; municipio?: string }) => {
+    setSearchFilters(prev => ({
+      ...prev,
+      ...filters,
+      page: 1
+    }));
+  };
+
   const handlePageChange = (newPage: number) => {
     setSearchFilters(prev => ({
       ...prev,
@@ -79,6 +90,22 @@ const Licitaciones: React.FC = () => {
     } catch {
       return dateString;
     }
+  };
+
+  // Función para obtener el badge de fuente con color
+  const getSourceBadge = (fuente: string) => {
+    const colors = {
+      'DOF': 'bg-purple-100 text-purple-800',
+      'ComprasMX': 'bg-blue-100 text-blue-800',
+      'Tianguis Digital': 'bg-green-100 text-green-800'
+    };
+    const color = colors[fuente] || 'bg-gray-100 text-gray-800';
+    
+    return (
+      <span className={`inline-flex px-2 py-1 text-xs font-medium rounded ${color}`}>
+        {fuente}
+      </span>
+    );
   };
 
   if (loading) {
@@ -106,7 +133,7 @@ const Licitaciones: React.FC = () => {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Dashboard de Licitaciones</h1>
           <p className="text-gray-600 mt-1">
-            {data?.pagination.total ? `${data.pagination.total} licitaciones encontradas` : 'Sin resultados'}
+            {data?.pagination.total ? `${data.pagination.total.toLocaleString()} licitaciones encontradas` : 'Sin resultados'}
           </p>
         </div>
         
@@ -128,7 +155,7 @@ const Licitaciones: React.FC = () => {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Buscar por título, descripción o número de procedimiento..."
+                placeholder="Buscar por título, descripción, número de procedimiento, estado o municipio..."
                 className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                 value={searchFilters.busqueda || ''}
                 onChange={(e) => handleFilterChange('busqueda', e.target.value)}
@@ -136,109 +163,125 @@ const Licitaciones: React.FC = () => {
             </div>
           </div>
 
-          {/* Filters - Solo los marcados con asterisco */}
+          {/* Filters */}
           {showFilters && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {/* Entidad Compradora * */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Entidad Compradora *
-                </label>
-                <select
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  value={searchFilters.entidad_compradora || ''}
-                  onChange={(e) => handleFilterChange('entidad_compradora', e.target.value)}
-                >
-                  <option value="">Todas las entidades</option>
-                  {filtros?.top_entidades?.slice(0, 20).map((entidad) => (
-                    <option key={entidad.entidad_compradora} value={entidad.entidad_compradora}>
-                      {entidad.entidad_compradora} ({entidad.cantidad})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Tipo de Procedimiento * */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Tipo de Procedimiento *
-                </label>
-                <select
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  value={searchFilters.tipo_procedimiento || ''}
-                  onChange={(e) => handleFilterChange('tipo_procedimiento', e.target.value)}
-                >
-                  <option value="">Todos los tipos</option>
-                  {filtros?.tipos_procedimiento?.map((tipo) => (
-                    <option key={tipo.tipo_procedimiento} value={tipo.tipo_procedimiento}>
-                      {tipo.tipo_procedimiento} ({tipo.cantidad})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Tipo de Contratación * */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Tipo de Contratación *
-                </label>
-                <select
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  value={searchFilters.tipo_contratacion || ''}
-                  onChange={(e) => handleFilterChange('tipo_contratacion', e.target.value)}
-                >
-                  <option value="">Todos los tipos</option>
-                  {filtros?.tipos_contratacion?.map((tipo) => (
-                    <option key={tipo.tipo_contratacion} value={tipo.tipo_contratacion}>
-                      {tipo.tipo_contratacion} ({tipo.cantidad})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Fecha Publicación Desde * */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Fecha Publicación (Desde) *
-                </label>
-                <input
-                  type="date"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  value={searchFilters.fecha_publicacion_inicio || ''}
-                  onChange={(e) => handleFilterChange('fecha_publicacion_inicio', e.target.value)}
+            <div className="space-y-6">
+              {/* Geographic Filters Section */}
+              <div className="border-t pt-4">
+                <h3 className="text-sm font-medium text-gray-900 mb-3">Filtros Geográficos</h3>
+                <GeographicFilters
+                  onFilterChange={handleGeographicFilterChange}
+                  selectedEstado={searchFilters.entidad_federativa}
+                  selectedMunicipio={searchFilters.municipio}
                 />
               </div>
 
-              {/* Fecha Apertura * */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Fecha Apertura *
-                </label>
-                <input
-                  type="date"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  value={searchFilters.fecha_apertura || ''}
-                  onChange={(e) => handleFilterChange('fecha_apertura', e.target.value)}
-                />
-              </div>
+              {/* Other Filters */}
+              <div className="border-t pt-4">
+                <h3 className="text-sm font-medium text-gray-900 mb-3">Otros Filtros</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {/* Entidad Compradora */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Entidad Compradora
+                    </label>
+                    <select
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      value={searchFilters.entidad_compradora || ''}
+                      onChange={(e) => handleFilterChange('entidad_compradora', e.target.value)}
+                    >
+                      <option value="">Todas las entidades</option>
+                      {filtros?.top_entidades?.slice(0, 20).map((entidad) => (
+                        <option key={entidad.entidad_compradora} value={entidad.entidad_compradora}>
+                          {entidad.entidad_compradora.substring(0, 50)}...
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-              {/* Fuente * */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Fuente *
-                </label>
-                <select
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  value={searchFilters.fuente || ''}
-                  onChange={(e) => handleFilterChange('fuente', e.target.value)}
-                >
-                  <option value="">Todas las fuentes</option>
-                  {filtros?.fuentes?.map((fuente) => (
-                    <option key={fuente.fuente} value={fuente.fuente}>
-                      {fuente.fuente} ({fuente.cantidad})
-                    </option>
-                  ))}
-                </select>
+                  {/* Tipo de Procedimiento */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Tipo de Procedimiento
+                    </label>
+                    <select
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      value={searchFilters.tipo_procedimiento || ''}
+                      onChange={(e) => handleFilterChange('tipo_procedimiento', e.target.value)}
+                    >
+                      <option value="">Todos los tipos</option>
+                      {filtros?.tipos_procedimiento?.map((tipo) => (
+                        <option key={tipo.tipo_procedimiento} value={tipo.tipo_procedimiento}>
+                          {tipo.tipo_procedimiento}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Tipo de Contratación */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Tipo de Contratación
+                    </label>
+                    <select
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      value={searchFilters.tipo_contratacion || ''}
+                      onChange={(e) => handleFilterChange('tipo_contratacion', e.target.value)}
+                    >
+                      <option value="">Todos los tipos</option>
+                      {filtros?.tipos_contratacion?.map((tipo) => (
+                        <option key={tipo.tipo_contratacion} value={tipo.tipo_contratacion}>
+                          {tipo.tipo_contratacion}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Fecha Publicación Desde */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Fecha Publicación (Desde)
+                    </label>
+                    <input
+                      type="date"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      value={searchFilters.fecha_desde || ''}
+                      onChange={(e) => handleFilterChange('fecha_desde', e.target.value)}
+                    />
+                  </div>
+
+                  {/* Fecha Publicación Hasta */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Fecha Publicación (Hasta)
+                    </label>
+                    <input
+                      type="date"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      value={searchFilters.fecha_hasta || ''}
+                      onChange={(e) => handleFilterChange('fecha_hasta', e.target.value)}
+                    />
+                  </div>
+
+                  {/* Fuente */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Fuente
+                    </label>
+                    <select
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      value={searchFilters.fuente || ''}
+                      onChange={(e) => handleFilterChange('fuente', e.target.value)}
+                    >
+                      <option value="">Todas las fuentes</option>
+                      {filtros?.fuentes?.map((fuente) => (
+                        <option key={fuente.fuente} value={fuente.fuente}>
+                          {fuente.fuente} ({fuente.cantidad})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -252,31 +295,34 @@ const Licitaciones: React.FC = () => {
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Número Procedimiento
+                  Número
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Título
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Entidad Compradora
+                  Entidad
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Tipo Procedimiento
+                  <div className="flex items-center">
+                    <MapPin className="h-3 w-3 mr-1" />
+                    Ubicación
+                  </div>
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Tipo Contratación
+                  Tipo
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Fecha Publicación
+                  Fechas
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Fecha Apertura
+                  Monto
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Fuente
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Acciones
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Ver
                 </th>
               </tr>
             </thead>
@@ -292,43 +338,78 @@ const Licitaciones: React.FC = () => {
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-900">
                     <div className="max-w-xs">
-                      <div className="font-medium truncate">
+                      <div className="font-medium truncate" title={licitacion.titulo}>
                         {licitacion.titulo || 'Sin título'}
                       </div>
                       {licitacion.descripcion && (
-                        <div className="text-xs text-gray-500 truncate mt-1">
+                        <div className="text-xs text-gray-500 truncate mt-1" title={licitacion.descripcion}>
                           {licitacion.descripcion}
                         </div>
                       )}
                     </div>
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-900">
-                    <div className="max-w-xs truncate">
+                    <div className="max-w-xs truncate" title={licitacion.entidad_compradora}>
                       {licitacion.entidad_compradora || 'N/A'}
                     </div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {licitacion.tipo_procedimiento || 'N/A'}
+                  <td className="px-6 py-4 text-sm text-gray-900">
+                    <div className="space-y-1">
+                      {licitacion.entidad_federativa && (
+                        <div className="flex items-center text-xs">
+                          <MapPin className="h-3 w-3 mr-1 text-gray-400" />
+                          <span className="font-medium">{licitacion.entidad_federativa}</span>
+                        </div>
+                      )}
+                      {licitacion.municipio && (
+                        <div className="flex items-center text-xs text-gray-600">
+                          <Building2 className="h-3 w-3 mr-1 text-gray-400" />
+                          <span>{licitacion.municipio}</span>
+                        </div>
+                      )}
+                      {!licitacion.entidad_federativa && !licitacion.municipio && (
+                        <span className="text-xs text-gray-400">Sin ubicación</span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-900">
+                    <div className="space-y-1">
+                      {licitacion.tipo_procedimiento && (
+                        <div className="text-xs">
+                          <span className="font-medium">Proc:</span> {licitacion.tipo_procedimiento}
+                        </div>
+                      )}
+                      {licitacion.tipo_contratacion && (
+                        <div className="text-xs text-gray-600">
+                          <span className="font-medium">Cont:</span> {licitacion.tipo_contratacion}
+                        </div>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-900">
+                    <div className="space-y-1">
+                      {licitacion.fecha_publicacion && (
+                        <div className="text-xs">
+                          <span className="font-medium">Pub:</span> {formatDate(licitacion.fecha_publicacion)}
+                        </div>
+                      )}
+                      {licitacion.fecha_apertura && (
+                        <div className="text-xs text-gray-600">
+                          <span className="font-medium">Aper:</span> {formatDate(licitacion.fecha_apertura)}
+                        </div>
+                      )}
+                    </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {licitacion.tipo_contratacion || 'N/A'}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {licitacion.fecha_publicacion ? 
-                      formatDate(licitacion.fecha_publicacion) : 'N/A'
-                    }
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {licitacion.fecha_apertura ? 
-                      formatDate(licitacion.fecha_apertura) : 'N/A'
+                    {licitacion.monto_estimado ? 
+                      formatCurrency(licitacion.monto_estimado) : 
+                      <span className="text-gray-400">N/D</span>
                     }
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="inline-flex px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded">
-                      {licitacion.fuente}
-                    </span>
+                    {getSourceBadge(licitacion.fuente)}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">
+                  <td className="px-6 py-4 whitespace-nowrap text-center">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -344,6 +425,13 @@ const Licitaciones: React.FC = () => {
               ))}
             </tbody>
           </table>
+
+          {/* Empty state */}
+          {(!data?.data || data.data.length === 0) && (
+            <div className="text-center py-12">
+              <p className="text-gray-500">No se encontraron licitaciones con los filtros aplicados</p>
+            </div>
+          )}
         </div>
 
         {/* Pagination */}
@@ -353,7 +441,7 @@ const Licitaciones: React.FC = () => {
               <div className="text-sm text-gray-700">
                 Mostrando página <span className="font-medium">{data.pagination.page}</span> de{' '}
                 <span className="font-medium">{data.pagination.total_pages}</span> 
-                {' '}({data.pagination.total} resultados totales)
+                {' '}({data.pagination.total.toLocaleString()} resultados totales)
               </div>
               
               <div className="flex items-center space-x-2">
