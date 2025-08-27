@@ -47,3 +47,4 @@ Thumbs.db
 frontend/node_modules/
 frontend/dist/
 frontend/.eslintcache
+.backend.pid
