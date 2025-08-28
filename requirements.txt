@@ -35,3 +35,6 @@ pdfminer.six==20231228
 # HTML Processing
 lxml==4.9.3
 html5lib==1.1
+
+# AI Processing (para extracción DOF)
+anthropic==0.39.0
