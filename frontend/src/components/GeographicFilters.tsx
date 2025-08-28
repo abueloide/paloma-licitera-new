@@ -30,12 +30,15 @@ export function GeographicFilters({
   useEffect(() => {
     // Filtrar municipios cuando cambia el estado seleccionado
     if (filtrosGeo && selectedEstado) {
-      const municipios = filtrosGeo.top_municipios.filter(
-        m => m.entidad_federativa === selectedEstado
-      );
+      const municipios = filtrosGeo.top_municipios
+        .filter(m => m.entidad_federativa === selectedEstado)
+        .filter(m => m.municipio && m.municipio.trim() !== ''); // Filtrar valores vacíos
       setMunicipiosFiltrados(municipios);
     } else {
-      setMunicipiosFiltrados(filtrosGeo?.top_municipios || []);
+      setMunicipiosFiltrados(
+        filtrosGeo?.top_municipios
+          .filter(m => m.municipio && m.municipio.trim() !== '') || [] // Filtrar valores vacíos
+      );
     }
   }, [selectedEstado, filtrosGeo]);
 
@@ -80,6 +83,10 @@ export function GeographicFilters({
   const porcentajeCobertura = filtrosGeo.cobertura.total_licitaciones > 0
     ? ((filtrosGeo.cobertura.licitaciones_con_estado / filtrosGeo.cobertura.total_licitaciones) * 100).toFixed(1)
     : 0;
+    
+  // Filtrar estados con valores vacíos
+  const estadosValidos = filtrosGeo.entidades_federativas
+    .filter(estado => estado.entidad_federativa && estado.entidad_federativa.trim() !== '');
 
   return (
     <div className="space-y-4">
@@ -118,8 +125,11 @@ export function GeographicFilters({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos los estados</SelectItem>
-            {filtrosGeo.entidades_federativas.map(estado => (
-              <SelectItem key={estado.entidad_federativa} value={estado.entidad_federativa}>
+            {estadosValidos.map((estado, index) => (
+              <SelectItem 
+                key={`${estado.entidad_federativa}-${index}`} 
+                value={estado.entidad_federativa}
+              >
                 <div className="flex justify-between items-center w-full">
                   <span>{estado.entidad_federativa}</span>
                   <span className="text-xs text-muted-foreground ml-2">
@@ -145,8 +155,11 @@ export function GeographicFilters({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todos los municipios</SelectItem>
-              {municipiosFiltrados.map(municipio => (
-                <SelectItem key={municipio.municipio} value={municipio.municipio}>
+              {municipiosFiltrados.map((municipio, index) => (
+                <SelectItem 
+                  key={`${municipio.municipio}-${index}`} 
+                  value={municipio.municipio}
+                >
                   <div className="flex justify-between items-center w-full">
                     <span>{municipio.municipio}</span>
                     <span className="text-xs text-muted-foreground ml-2">
@@ -163,10 +176,10 @@ export function GeographicFilters({
       {/* Información adicional */}
       {selectedEstado && (
         <div className="text-xs text-muted-foreground bg-gray-50 p-3 rounded">
-          {filtrosGeo.entidades_federativas.find(e => e.entidad_federativa === selectedEstado) && (
+          {estadosValidos.find(e => e.entidad_federativa === selectedEstado) && (
             <div>
               <strong>{selectedEstado}</strong> tiene{' '}
-              {filtrosGeo.entidades_federativas
+              {estadosValidos
                 .find(e => e.entidad_federativa === selectedEstado)
                 ?.municipios_unicos || 0}{' '}
               municipios con licitaciones registradas
