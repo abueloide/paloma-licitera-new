@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Extractor DOF con procesamiento directo de PDF usando Claude Haiku
-===================================================================
-Procesa PDFs completos sin conversión a TXT para mejor precisión
+Extractor DOF con procesamiento de páginas específicas usando Claude Haiku
+===========================================================================
+Extrae solo las páginas con licitaciones para respetar límite de 100 páginas
 """
 
 import os
 import json
 import base64
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
@@ -31,8 +31,14 @@ except ImportError:
     logger.error("anthropic no instalado. Ejecuta: pip install anthropic")
     exit(1)
 
+try:
+    import PyPDF2
+except ImportError:
+    logger.error("PyPDF2 no instalado. Ejecuta: pip install PyPDF2")
+    exit(1)
+
 class DOFExtractorPDFAI:
-    """Extractor DOF que procesa PDFs directamente con Claude"""
+    """Extractor DOF que procesa PDFs con límite de páginas"""
     
     def __init__(self):
         # Configurar API key desde .env
@@ -62,73 +68,148 @@ class DOFExtractorPDFAI:
         logger.info(f"Directorio de PDFs DOF: {self.raw_dir}")
         logger.info(f"Directorio de salida: {self.processed_dir}")
     
+    def encontrar_paginas_licitaciones(self, pdf_path: Path) -> Tuple[int, int]:
+        """
+        Encuentra el rango de páginas que contienen licitaciones
+        Busca desde "CONVOCATORIAS" hasta "AVISOS"
+        """
+        try:
+            with open(pdf_path, 'rb') as file:
+                pdf_reader = PyPDF2.PdfReader(file)
+                total_pages = len(pdf_reader.pages)
+                
+                self.logger.info(f"  PDF tiene {total_pages} páginas totales")
+                
+                inicio_pagina = None
+                fin_pagina = None
+                
+                # Buscar página de inicio (CONVOCATORIAS)
+                for i in range(min(100, total_pages)):  # Buscar en primeras 100 páginas
+                    page = pdf_reader.pages[i]
+                    text = page.extract_text().upper()
+                    
+                    if "CONVOCATORIAS PARA CONCURSOS" in text or "CONVOCATORIAS Y AVISOS" in text:
+                        inicio_pagina = i
+                        self.logger.info(f"  ✓ Sección de convocatorias encontrada en página {i+1}")
+                        break
+                
+                if inicio_pagina is None:
+                    self.logger.warning("  ⚠️ No se encontró sección de convocatorias")
+                    # Intentar con las primeras 50 páginas como fallback
+                    inicio_pagina = 0
+                    fin_pagina = min(50, total_pages)
+                else:
+                    # Buscar página final (AVISOS o final del documento)
+                    for i in range(inicio_pagina + 1, min(inicio_pagina + 100, total_pages)):
+                        page = pdf_reader.pages[i]
+                        text = page.extract_text().upper()
+                        
+                        if "AVISOS JUDICIALES" in text or "AVISOS GENERALES" in text:
+                            fin_pagina = i
+                            self.logger.info(f"  ✓ Fin de convocatorias en página {i+1}")
+                            break
+                    
+                    if fin_pagina is None:
+                        # Si no encontramos AVISOS, tomar hasta 80 páginas después
+                        fin_pagina = min(inicio_pagina + 80, total_pages)
+                
+                return inicio_pagina, fin_pagina
+                
+        except Exception as e:
+            self.logger.error(f"Error analizando PDF: {e}")
+            # Por defecto, tomar primeras 50 páginas
+            return 0, 50
+    
+    def extraer_paginas_pdf(self, pdf_path: Path, inicio: int, fin: int) -> bytes:
+        """
+        Extrae un rango de páginas del PDF y retorna como bytes
+        """
+        try:
+            with open(pdf_path, 'rb') as input_file:
+                pdf_reader = PyPDF2.PdfReader(input_file)
+                pdf_writer = PyPDF2.PdfWriter()
+                
+                # Añadir páginas al writer
+                for i in range(inicio, min(fin, len(pdf_reader.pages))):
+                    pdf_writer.add_page(pdf_reader.pages[i])
+                
+                # Escribir a bytes
+                import io
+                output_buffer = io.BytesIO()
+                pdf_writer.write(output_buffer)
+                pdf_bytes = output_buffer.getvalue()
+                
+                self.logger.info(f"  📄 Extrayendo páginas {inicio+1} a {fin} ({fin-inicio} páginas)")
+                return pdf_bytes
+                
+        except Exception as e:
+            self.logger.error(f"Error extrayendo páginas: {e}")
+            return None
+    
     def procesar_pdf_con_ia(self, pdf_path: Path) -> List[Dict]:
         """
-        Procesa un PDF completo con Claude Haiku
+        Procesa solo las páginas relevantes del PDF con Claude Haiku
         """
         self.logger.info(f"Procesando PDF: {pdf_path.name}")
         
-        # Leer y codificar PDF
-        try:
-            with open(pdf_path, 'rb') as f:
-                pdf_content = f.read()
-                pdf_base64 = base64.b64encode(pdf_content).decode('utf-8')
-        except Exception as e:
-            self.logger.error(f"Error leyendo PDF {pdf_path}: {e}")
+        # Encontrar páginas con licitaciones
+        inicio, fin = self.encontrar_paginas_licitaciones(pdf_path)
+        
+        # Extraer solo esas páginas
+        pdf_bytes = self.extraer_paginas_pdf(pdf_path, inicio, fin)
+        if not pdf_bytes:
             return []
         
-        # Tamaño del PDF
-        size_mb = len(pdf_content) / (1024 * 1024)
-        self.logger.info(f"  Tamaño del PDF: {size_mb:.2f} MB")
+        # Codificar a base64
+        pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
+        size_mb = len(pdf_bytes) / (1024 * 1024)
+        self.logger.info(f"  Tamaño del segmento: {size_mb:.2f} MB")
         
-        # Prompt optimizado para extracción completa
-        prompt = """Analiza este PDF del Diario Oficial de la Federación y extrae TODAS las licitaciones públicas.
+        # Prompt optimizado
+        prompt = """Analiza este fragmento del Diario Oficial que contiene CONVOCATORIAS DE LICITACIONES.
 
 INSTRUCCIONES CRÍTICAS:
-1. Busca la sección "CONVOCATORIAS PARA CONCURSOS DE ADQUISICIONES, ARRENDAMIENTOS, OBRAS Y SERVICIOS DEL SECTOR PÚBLICO"
-2. Extrae CADA licitación como un objeto JSON separado
-3. El numero_procedimiento es OBLIGATORIO - búscalo en formatos como:
+1. Extrae TODAS las licitaciones que encuentres
+2. El numero_procedimiento es OBLIGATORIO - búscalo en formatos como:
    - LA-006HHE001-E150-2025
-   - IO-020VST001-E114-2025
+   - IO-020VST001-E114-2025  
    - LPN-006000999-E46-2025
-   - Cualquier código que empiece con LA-, IO-, LPN-, LP-, etc.
+   - LP-INE-XXX/2025
+3. Si no encuentras el número, NO incluyas esa licitación
 
-Para CADA licitación encontrada, extrae:
+Para CADA licitación, extrae TODOS estos campos:
 
 {
-  "numero_procedimiento": "OBLIGATORIO - el código de la licitación",
-  "titulo": "objeto de la licitación o descripción principal",
-  "descripcion": "descripción detallada, volumen a adquirir, especificaciones",
-  "entidad_compradora": "SECRETARÍA o institución convocante",
-  "unidad_compradora": "dirección o área específica",
+  "numero_procedimiento": "OBLIGATORIO - el código completo",
+  "titulo": "objeto de la licitación",
+  "descripcion": "descripción detallada",
+  "entidad_compradora": "SECRETARÍA o institución",
+  "unidad_compradora": "dirección o área",
   "tipo_procedimiento": "LICITACIÓN PÚBLICA NACIONAL/INTERNACIONAL o INVITACIÓN A CUANDO MENOS TRES",
   "tipo_contratacion": "ADQUISICIONES/SERVICIOS/OBRA PÚBLICA/ARRENDAMIENTO",
   "caracter": "NACIONAL/INTERNACIONAL/INTERNACIONAL BAJO TRATADOS",
-  "entidad_federativa": "estado donde se realizará",
-  "municipio": "municipio o delegación si aplica",
-  "fecha_publicacion": "fecha del DOF en formato YYYY-MM-DD",
-  "fecha_apertura": "fecha de apertura de propuestas YYYY-MM-DD HH:MM:SS",
-  "fecha_fallo": "fecha del fallo YYYY-MM-DD HH:MM:SS",
-  "fecha_junta_aclaraciones": "fecha de junta de aclaraciones YYYY-MM-DD HH:MM:SS",
-  "fecha_visita_lugar": "fecha de visita al sitio YYYY-MM-DD HH:MM:SS si aplica",
-  "costo_bases": "costo de las bases en pesos si se menciona",
-  "lugar_obtener_bases": "dónde se pueden obtener las bases"
+  "entidad_federativa": "estado",
+  "municipio": "municipio si aplica",
+  "fecha_publicacion": "YYYY-MM-DD",
+  "fecha_apertura": "YYYY-MM-DD HH:MM:SS",
+  "fecha_fallo": "YYYY-MM-DD HH:MM:SS",
+  "fecha_junta_aclaraciones": "YYYY-MM-DD HH:MM:SS",
+  "fecha_visita_lugar": "YYYY-MM-DD HH:MM:SS si aplica",
+  "costo_bases": "número o 0 si es sin costo",
+  "lugar_obtener_bases": "dónde obtener bases"
 }
 
-REGLAS:
-- Si no encuentras un campo, usa null
-- Si un PDF contiene múltiples licitaciones, devuelve un array con TODAS
-- Extrae fechas del año 2025 correctamente
-- Si las bases dicen "sin costo", pon 0 en costo_bases
-- El numero_procedimiento NUNCA debe ser null
-
-Responde ÚNICAMENTE con un JSON array de licitaciones: [...]"""
+IMPORTANTE:
+- Solo incluye licitaciones CON numero_procedimiento
+- Las fechas son del año 2025
+- Responde SOLO con el JSON array: [...]
+- NO incluyas texto adicional antes o después del JSON"""
 
         try:
-            # Llamada a Claude con el PDF
+            # Llamada a Claude
             message = self.client.messages.create(
                 model="claude-3-5-haiku-20241022",
-                max_tokens=8000,  # Más tokens para PDFs grandes
+                max_tokens=8000,
                 temperature=0,
                 messages=[{
                     "role": "user",
@@ -152,18 +233,22 @@ Responde ÚNICAMENTE con un JSON array de licitaciones: [...]"""
             # Parsear respuesta
             respuesta_texto = message.content[0].text.strip()
             
-            # Limpiar markdown si existe
-            if respuesta_texto.startswith("```"):
-                respuesta_texto = respuesta_texto.replace("```json", "").replace("```", "").strip()
+            # Buscar el JSON en la respuesta
+            # A veces Claude responde con texto antes del JSON
+            inicio_json = respuesta_texto.find('[')
+            if inicio_json > 0:
+                respuesta_texto = respuesta_texto[inicio_json:]
+            
+            # Limpiar markdown
+            respuesta_texto = respuesta_texto.replace("```json", "").replace("```", "").strip()
             
             # Parsear JSON
             licitaciones = json.loads(respuesta_texto)
             
-            # Asegurar que es una lista
             if isinstance(licitaciones, dict):
                 licitaciones = [licitaciones]
             
-            # Añadir metadatos a cada licitación
+            # Añadir metadatos
             for lic in licitaciones:
                 lic['fuente'] = 'DOF'
                 lic['estado'] = 'PUBLICADA'
@@ -173,25 +258,22 @@ Responde ÚNICAMENTE con un JSON array de licitaciones: [...]"""
                     'fecha_procesamiento': datetime.now().isoformat(),
                     'procesado_con_ia': True,
                     'modelo': 'claude-3-5-haiku-20241022',
-                    'procesamiento': 'PDF_DIRECTO'
+                    'procesamiento': 'PDF_PARCIAL',
+                    'paginas_procesadas': f"{inicio+1}-{fin}"
                 }
             
-            # Filtrar licitaciones sin numero_procedimiento
+            # Filtrar sin numero_procedimiento
             licitaciones_validas = [lic for lic in licitaciones if lic.get('numero_procedimiento')]
-            licitaciones_sin_numero = len(licitaciones) - len(licitaciones_validas)
             
-            if licitaciones_sin_numero > 0:
-                self.logger.warning(f"  ⚠️ {licitaciones_sin_numero} licitaciones sin numero_procedimiento (descartadas)")
-            
-            self.logger.info(f"  ✅ Extraídas {len(licitaciones_validas)} licitaciones válidas del PDF")
+            self.logger.info(f"  ✅ Extraídas {len(licitaciones_validas)} licitaciones válidas")
             return licitaciones_validas
             
         except json.JSONDecodeError as e:
-            self.logger.error(f"Error parseando JSON de Claude: {e}")
-            self.logger.error(f"Respuesta: {respuesta_texto[:500]}...")
+            self.logger.error(f"Error parseando JSON: {e}")
+            self.logger.debug(f"Respuesta: {respuesta_texto[:500]}...")
             return []
         except Exception as e:
-            self.logger.error(f"Error con API de Claude: {e}")
+            self.logger.error(f"Error con API: {e}")
             return []
     
     def extract(self) -> List[Dict]:
@@ -200,25 +282,21 @@ Responde ÚNICAMENTE con un JSON array de licitaciones: [...]"""
         """
         self.logger.info("=== Iniciando extracción DOF desde PDFs con IA ===")
         
-        # Buscar archivos PDF del DOF
+        # Buscar archivos PDF
         archivos_pdf = list(self.raw_dir.glob("*.pdf"))
         
         if not archivos_pdf:
             self.logger.warning(f"No se encontraron archivos PDF en {self.raw_dir}")
-            self.logger.info("Ejecuta primero el descargador de PDFs del DOF")
             return []
         
-        # Filtrar archivos DOF (con MAT o VES en el nombre)
+        # Filtrar archivos DOF
         archivos_dof = [f for f in archivos_pdf 
                        if 'MAT' in f.name or 'VES' in f.name]
         
         if not archivos_dof:
-            self.logger.info("Procesando todos los PDFs encontrados...")
             archivos_dof = archivos_pdf
         
-        self.logger.info(f"📄 Encontrados {len(archivos_dof)} PDFs para procesar:")
-        for archivo in archivos_dof:
-            self.logger.info(f"  - {archivo.name}")
+        self.logger.info(f"📄 Encontrados {len(archivos_dof)} PDFs para procesar")
         
         todas_licitaciones = []
         estadisticas = {
@@ -245,21 +323,21 @@ Responde ÚNICAMENTE con un JSON array de licitaciones: [...]"""
                         'total_licitaciones': len(licitaciones),
                         'procesado_con_ia': True,
                         'modelo': 'claude-3-5-haiku-20241022',
-                        'metodo': 'PDF_DIRECTO',
+                        'metodo': 'PDF_PARCIAL',
                         'licitaciones': licitaciones
                     }, f, ensure_ascii=False, indent=2)
                 
                 self.logger.info(f"  💾 Guardado: {archivo_salida.name}")
                 todas_licitaciones.extend(licitaciones)
         
-        # Mostrar estadísticas
+        # Estadísticas finales
         self.logger.info("=" * 50)
         self.logger.info("📊 ESTADÍSTICAS FINALES:")
         self.logger.info(f"  • PDFs procesados: {estadisticas['pdfs_procesados']}")
         self.logger.info(f"  • PDFs con licitaciones: {estadisticas['pdfs_con_licitaciones']}")
         self.logger.info(f"  • Total licitaciones extraídas: {estadisticas['total_licitaciones']}")
         
-        # Guardar resumen consolidado
+        # Guardar consolidado
         if todas_licitaciones:
             resumen_archivo = self.processed_dir / f"dof_pdf_consolidado_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
             with open(resumen_archivo, 'w', encoding='utf-8') as f:
@@ -278,13 +356,8 @@ def main():
     print("\n🚀 Iniciando extractor DOF desde PDFs con IA...")
     print("=" * 60)
     
-    # Verificar API key
     if not os.getenv('ANTHROPIC_API_KEY'):
         print("\n❌ ERROR: ANTHROPIC_API_KEY no configurada")
-        print("\nPasos para configurar:")
-        print("1. Crea un archivo .env en la raíz del proyecto")
-        print("2. Añade la siguiente línea:")
-        print("   ANTHROPIC_API_KEY=tu_api_key_aqui")
         return
     
     try:
@@ -301,11 +374,7 @@ def main():
             titulo = lic.get('titulo', 'N/A')
             if titulo and titulo != 'N/A':
                 print(f"  • Título: {titulo[:80]}...")
-            else:
-                print(f"  • Título: N/A")
             print(f"  • Entidad: {lic.get('entidad_compradora', 'N/A')}")
-            print(f"  • Fecha apertura: {lic.get('fecha_apertura', 'N/A')}")
-            print(f"  • Fecha fallo: {lic.get('fecha_fallo', 'N/A')}")
             
     except Exception as e:
         print(f"\n❌ Error: {e}")
