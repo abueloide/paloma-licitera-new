@@ -50,7 +50,7 @@ class DOFExtractorAI:
         # Detectar rutas del proyecto
         script_dir = Path(__file__).parent
         # Subir hasta la raíz del proyecto (paloma-licitera-new)
-        project_root = script_dir.parent.parent.parent
+        project_root = script_dir.parent.parent  # FIX: Solo 2 niveles arriba
         
         # Rutas de archivos
         self.raw_dir = project_root / "data" / "raw" / "dof"
