@@ -3,13 +3,13 @@
 """
 Extractor DOF mejorado con Claude Haiku 3.5
 ============================================
-Integrado completamente con el sistema ETL de Paloma Licitera
+Versión standalone que funciona independientemente
 """
 
 import os
 import re
 import json
-import sys
+import logging
 from typing import Dict, List, Optional
 from datetime import datetime
 from pathlib import Path
@@ -18,32 +18,50 @@ from dotenv import load_dotenv
 # Cargar variables de entorno
 load_dotenv()
 
-# Agregar el directorio raíz al path
-sys.path.append(str(Path(__file__).parent.parent.parent.parent))
+# Configurar logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-from etl_process.extractors.base_extractor import BaseExtractor
-import anthropic
+try:
+    import anthropic
+except ImportError:
+    logger.error("anthropic no instalado. Ejecuta: pip install anthropic")
+    exit(1)
 
-class DOFExtractorAI(BaseExtractor):
+class DOFExtractorAI:
     """Extractor mejorado del DOF usando Claude Haiku"""
     
     def __init__(self):
-        super().__init__('dof')
-        
         # Configurar API key desde .env
         api_key = os.getenv('ANTHROPIC_API_KEY')
-        if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY no configurada en .env")
+        if not api_key or api_key == 'your_api_key_here':
+            raise ValueError(
+                "ANTHROPIC_API_KEY no configurada en .env\n"
+                "Crea un archivo .env en la raíz del proyecto con:\n"
+                "ANTHROPIC_API_KEY=tu_api_key_aqui"
+            )
             
         self.client = anthropic.Anthropic(api_key=api_key)
+        self.logger = logger
+        
+        # Detectar rutas del proyecto
+        script_dir = Path(__file__).parent
+        # Subir hasta la raíz del proyecto (paloma-licitera-new)
+        project_root = script_dir.parent.parent.parent
         
         # Rutas de archivos
-        self.raw_dir = Path("data/raw/dof")
-        self.processed_dir = Path("data/processed/dof")
+        self.raw_dir = project_root / "data" / "raw" / "dof"
+        self.processed_dir = project_root / "data" / "processed" / "dof"
         
         # Crear directorios si no existen
         self.raw_dir.mkdir(parents=True, exist_ok=True)
         self.processed_dir.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"Directorio de archivos DOF: {self.raw_dir}")
+        logger.info(f"Directorio de salida: {self.processed_dir}")
         
     def extraer_bloques_texto(self, archivo_txt: Path) -> List[str]:
         """
@@ -112,6 +130,7 @@ REGLAS:
 - Si no encuentras un campo, usa null
 - Normaliza fechas al formato ISO
 - Para fechas del año 2025, asegúrate de poner 2025
+- Si dice "14 de agosto de 2025" debe ser "2025-08-14"
 - Si es "a plazos reducidos", inclúyelo en descripción
 
 RESPONDE SOLO CON EL JSON."""
@@ -145,7 +164,7 @@ RESPONDE SOLO CON EL JSON."""
         """
         Procesa un archivo completo del DOF
         """
-        self.logger.info(f"Procesando: {archivo_txt}")
+        self.logger.info(f"Procesando: {archivo_txt.name}")
         
         # Extraer bloques de texto
         bloques = self.extraer_bloques_texto(archivo_txt)
@@ -179,20 +198,38 @@ RESPONDE SOLO CON EL JSON."""
     
     def extract(self) -> List[Dict]:
         """
-        Método principal del ETL - extrae todas las licitaciones DOF
+        Método principal - extrae todas las licitaciones DOF
         """
         self.logger.info("=== Iniciando extracción DOF con IA ===")
         
+        # Verificar que exista el directorio
+        if not self.raw_dir.exists():
+            self.logger.error(f"No existe el directorio: {self.raw_dir}")
+            self.logger.error("Asegúrate de estar en la raíz del proyecto paloma-licitera-new")
+            return []
+        
         # Buscar archivos TXT del DOF
         archivos_txt = list(self.raw_dir.glob("*.txt"))
+        
+        if not archivos_txt:
+            self.logger.warning(f"No se encontraron archivos .txt en {self.raw_dir}")
+            self.logger.info("Archivos disponibles:")
+            for archivo in self.raw_dir.iterdir():
+                self.logger.info(f"  - {archivo.name}")
+            return []
+        
+        # Filtrar archivos DOF (con MAT o VES en el nombre)
         archivos_dof = [f for f in archivos_txt 
                        if 'MAT' in f.name or 'VES' in f.name]
         
         if not archivos_dof:
-            self.logger.warning(f"No se encontraron archivos DOF en {self.raw_dir}")
-            return []
+            self.logger.warning("No se encontraron archivos DOF (con MAT o VES)")
+            self.logger.info("Procesando todos los archivos .txt encontrados...")
+            archivos_dof = archivos_txt
         
-        self.logger.info(f"Encontrados {len(archivos_dof)} archivos DOF para procesar")
+        self.logger.info(f"Encontrados {len(archivos_dof)} archivos para procesar:")
+        for archivo in archivos_dof:
+            self.logger.info(f"  - {archivo.name}")
         
         todas_licitaciones = []
         
@@ -212,33 +249,38 @@ RESPONDE SOLO CON EL JSON."""
                     'licitaciones': licitaciones
                 }, f, ensure_ascii=False, indent=2)
             
-            self.logger.info(f"  Guardado: {archivo_salida}")
+            self.logger.info(f"  Guardado: {archivo_salida.name}")
             todas_licitaciones.extend(licitaciones)
         
         self.logger.info(f"=== Total extraído: {len(todas_licitaciones)} licitaciones ===")
         
         # Guardar resumen consolidado
-        resumen_archivo = self.processed_dir / f"dof_consolidado_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        with open(resumen_archivo, 'w', encoding='utf-8') as f:
-            json.dump({
-                'fecha_procesamiento': datetime.now().isoformat(),
-                'total_archivos_procesados': len(archivos_dof),
-                'total_licitaciones': len(todas_licitaciones),
-                'licitaciones': todas_licitaciones
-            }, f, ensure_ascii=False, indent=2)
+        if todas_licitaciones:
+            resumen_archivo = self.processed_dir / f"dof_consolidado_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            with open(resumen_archivo, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'fecha_procesamiento': datetime.now().isoformat(),
+                    'total_archivos_procesados': len(archivos_dof),
+                    'total_licitaciones': len(todas_licitaciones),
+                    'licitaciones': todas_licitaciones
+                }, f, ensure_ascii=False, indent=2)
+            self.logger.info(f"Resumen guardado en: {resumen_archivo.name}")
         
         return todas_licitaciones
 
 
 def main():
     """Función principal para pruebas"""
-    print("Iniciando extractor DOF con IA...")
+    print("\n🚀 Iniciando extractor DOF con IA...")
+    print("="*50)
     
     # Verificar API key
     if not os.getenv('ANTHROPIC_API_KEY'):
-        print("ERROR: Configura ANTHROPIC_API_KEY en el archivo .env")
-        print("Crea un archivo .env con:")
-        print("ANTHROPIC_API_KEY=tu_api_key_aqui")
+        print("\n❌ ERROR: ANTHROPIC_API_KEY no configurada")
+        print("\nPasos para configurar:")
+        print("1. Crea un archivo .env en la raíz del proyecto")
+        print("2. Añade la siguiente línea:")
+        print("   ANTHROPIC_API_KEY=tu_api_key_aqui")
         return
     
     try:
@@ -249,14 +291,16 @@ def main():
         print(f"Total licitaciones extraídas: {len(licitaciones)}")
         
         if licitaciones:
-            print("\nEjemplo de licitación:")
+            print("\n📋 Ejemplo de licitación extraída:")
             lic = licitaciones[0]
             print(f"  • Número: {lic.get('numero_procedimiento', 'N/A')}")
             print(f"  • Título: {lic.get('titulo', 'N/A')[:80]}...")
             print(f"  • Entidad: {lic.get('entidad_compradora', 'N/A')}")
+            print(f"  • Fecha apertura: {lic.get('fecha_apertura', 'N/A')}")
+            print(f"  • Fecha fallo: {lic.get('fecha_fallo', 'N/A')}")
             
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"\n❌ Error: {e}")
         import traceback
         traceback.print_exc()
 
