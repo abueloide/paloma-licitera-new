@@ -6,6 +6,9 @@ Descarga mejorada de PDFs del DOF con manejo robusto de SSL/certificados
 - Múltiples métodos de descarga
 - Reintentos automáticos
 - Mejor logging y diagnóstico
+- USA EL EXTRACTOR MEJORADO para mejor parseo de datos
+
+Actualización: 28/12/2024 - Integración con estructura_dof_mejorado.py
 
 Dependencias requeridas:
     pip install requests pymupdf pdfminer.six urllib3 certifi
@@ -40,13 +43,23 @@ logging.getLogger("urllib3").setLevel(logging.ERROR)
 # Asegura que el directorio actual esté en sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# Intentar importar estructura_dof si existe
+# Intentar importar extractores (preferir el mejorado)
+ESTRUCTURA_DISPONIBLE = False
+USAR_MEJORADO = False
+
 try:
-    from estructura_dof import DOFLicitacionesExtractor
+    from estructura_dof_mejorado import ExtractorDOFMejorado
     ESTRUCTURA_DISPONIBLE = True
+    USAR_MEJORADO = True
+    logger.info("✅ Usando extractor MEJORADO de estructura DOF")
 except ImportError:
-    logger.warning("No se encontró estructura_dof.py - Se omitirá la extracción estructurada")
-    ESTRUCTURA_DISPONIBLE = False
+    logger.warning("No se encontró estructura_dof_mejorado.py, intentando con estructura_dof.py")
+    try:
+        from estructura_dof import DOFLicitacionesExtractor
+        ESTRUCTURA_DISPONIBLE = True
+        logger.info("Usando extractor estándar de estructura DOF")
+    except ImportError:
+        logger.warning("❌ No se encontró ningún extractor de estructura - Se omitirá la extracción estructurada")
 
 # ========= Configuración =========
 OUT_DIR = "../../../data/raw/dof"
@@ -276,6 +289,8 @@ def main():
     logger.info(f"Período: Martes y Jueves de Agosto 2025")
     logger.info(f"Total de fechas: {len(AUG_2025)}")
     logger.info(f"Ediciones: {', '.join(EDICIONES)}")
+    if USAR_MEJORADO:
+        logger.info("🚀 Usando extractor MEJORADO con parseo de fechas")
     logger.info("="*60)
     
     # Crear directorios
@@ -290,13 +305,15 @@ def main():
         "exitosos": 0,
         "fallidos": 0,
         "txt_generados": 0,
-        "json_generados": 0
+        "json_generados": 0,
+        "json_mejorados": 0
     }
     
     # Resumen de procesamiento
     resumen = {
         "period": "2025-08-martes-jueves",
         "fecha_proceso": date.today().isoformat(),
+        "extractor_usado": "mejorado" if USAR_MEJORADO else "estándar",
         "pdfs": []
     }
     
@@ -316,7 +333,8 @@ def main():
                 "pdf": None,
                 "txt": None,
                 "json": None,
-                "status": "pending"
+                "status": "pending",
+                "extractor": "mejorado" if USAR_MEJORADO else "estándar"
             }
             
             # Descargar PDF
@@ -351,17 +369,33 @@ def main():
                     # Extracción estructurada si está disponible
                     if ESTRUCTURA_DISPONIBLE:
                         try:
-                            extractor = DOFLicitacionesExtractor(txt_path)
-                            if extractor.procesar():
-                                json_src = txt_path.replace('.txt', '_licitaciones.json')
-                                json_dst = os.path.join(OUT_JSON_DIR, f"{tag}_licitaciones.json")
-                                
-                                if os.path.exists(json_src):
-                                    os.rename(json_src, json_dst)
-                                    logger.info(f"[JSON] Generado: {json_dst}")
-                                    entry["json"] = json_dst
-                                    entry["status"] = "fully_processed"
-                                    stats["json_generados"] += 1
+                            if USAR_MEJORADO:
+                                # Usar extractor mejorado
+                                extractor = ExtractorDOFMejorado(txt_path)
+                                if extractor.procesar():
+                                    json_src = txt_path.replace('.txt', '_licitaciones_mejorado.json')
+                                    json_dst = os.path.join(OUT_JSON_DIR, f"{tag}_licitaciones_mejorado.json")
+                                    
+                                    if os.path.exists(json_src):
+                                        os.rename(json_src, json_dst)
+                                        logger.info(f"[JSON MEJORADO] Generado: {json_dst}")
+                                        entry["json"] = json_dst
+                                        entry["status"] = "fully_processed_enhanced"
+                                        stats["json_mejorados"] += 1
+                                        stats["json_generados"] += 1
+                            else:
+                                # Usar extractor estándar
+                                extractor = DOFLicitacionesExtractor(txt_path)
+                                if extractor.procesar():
+                                    json_src = txt_path.replace('.txt', '_licitaciones.json')
+                                    json_dst = os.path.join(OUT_JSON_DIR, f"{tag}_licitaciones.json")
+                                    
+                                    if os.path.exists(json_src):
+                                        os.rename(json_src, json_dst)
+                                        logger.info(f"[JSON] Generado: {json_dst}")
+                                        entry["json"] = json_dst
+                                        entry["status"] = "fully_processed"
+                                        stats["json_generados"] += 1
                         except Exception as e:
                             logger.error(f"Error en extracción estructurada: {e}")
                 
@@ -389,6 +423,8 @@ def main():
     logger.info(f"✗ PDFs fallidos: {stats['fallidos']}")
     logger.info(f"✓ TXT generados: {stats['txt_generados']}")
     logger.info(f"✓ JSON generados: {stats['json_generados']}")
+    if USAR_MEJORADO:
+        logger.info(f"🚀 JSON mejorados: {stats['json_mejorados']}")
     logger.info(f"📁 Archivos guardados en: {os.path.abspath(OUT_DIR)}")
     logger.info(f"📊 Resumen guardado en: {resumen_path}")
     logger.info("="*60)
