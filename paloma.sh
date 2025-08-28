@@ -274,14 +274,16 @@ case $COMMAND in
             DOF_FILES=$(ls data/raw/dof/*.txt 2>/dev/null | wc -l)
             COMPRAS_FILES=$(ls data/raw/comprasmx/*.json 2>/dev/null | wc -l)
             TIANGUIS_FILES=$(ls data/raw/tianguis/*.json 2>/dev/null | wc -l)
-            SITIOS_FILES=$(ls data/raw/sitios-masivos/*.jsonl 2>/dev/null | wc -l)
+            # SITIOS_FILES=$(ls data/raw/sitios-masivos/*.jsonl 2>/dev/null | wc -l)
+            # TEMPORALMENTE DESHABILITADO
+            SITIOS_FILES=0
             
             echo "  - DOF: $DOF_FILES archivos"
             echo "  - ComprasMX: $COMPRAS_FILES archivos"
             echo "  - Tianguis: $TIANGUIS_FILES archivos"
-            echo "  - Sitios Masivos: $SITIOS_FILES archivos"
+            echo "  - Sitios Masivos: DESHABILITADO TEMPORALMENTE"
             
-            TOTAL_FILES=$((DOF_FILES + COMPRAS_FILES + TIANGUIS_FILES + SITIOS_FILES))
+            TOTAL_FILES=$((DOF_FILES + COMPRAS_FILES + TIANGUIS_FILES))
             if [ $TOTAL_FILES -gt 0 ]; then
                 print_status "Hay $TOTAL_FILES archivos de datos disponibles"
             else
@@ -558,11 +560,11 @@ case $COMMAND in
         [ -d "data/raw/dof" ] && DOF_FILES=$(ls data/raw/dof/*.txt 2>/dev/null | wc -l) || DOF_FILES=0
         [ -d "data/raw/comprasmx" ] && COMPRAS_FILES=$(ls data/raw/comprasmx/*.json 2>/dev/null | wc -l) || COMPRAS_FILES=0
         [ -d "data/raw/tianguis" ] && TIANGUIS_FILES=$(ls data/raw/tianguis/*.json 2>/dev/null | wc -l) || TIANGUIS_FILES=0
-        [ -d "data/raw/sitios-masivos" ] && SITIOS_FILES=$(ls data/raw/sitios-masivos/*.jsonl 2>/dev/null | wc -l) || SITIOS_FILES=0
+        # [ -d "data/raw/sitios-masivos" ] && SITIOS_FILES=$(ls data/raw/sitios-masivos/*.jsonl 2>/dev/null | wc -l) || SITIOS_FILES=0
         echo "  - DOF: $DOF_FILES archivos TXT"
         echo "  - ComprasMX: $COMPRAS_FILES archivos JSON"
         echo "  - Tianguis: $TIANGUIS_FILES archivos JSON"
-        echo "  - Sitios Masivos: $SITIOS_FILES archivos JSONL"
+        echo "  - Sitios Masivos: DESHABILITADO TEMPORALMENTE"
         ;;
         
     download)
@@ -579,23 +581,27 @@ case $COMMAND in
         source venv/bin/activate
         
         echo "Selecciona qué descargar:"
-        echo "1) Todo (ComprasMX, DOF, Tianguis, Sitios Masivos)"
+        echo "1) Todo disponible (ComprasMX, DOF, Tianguis) - Sitios Masivos DESHABILITADO"
         echo "2) Solo procesar archivos existentes (sin descargar)"
         echo "3) Solo ComprasMX"
         echo "4) Solo DOF"
         echo "5) Solo Tianguis Digital"
-        echo "6) Solo Sitios Masivos"
+        echo "6) [DESHABILITADO] Sitios Masivos"
         echo -n "Opción: "
         read option
         
         case $option in
             1)
                 print_warning "NOTA: El proceso puede tardar varios minutos."
+                print_warning "Sitios Masivos está DESHABILITADO temporalmente."
                 print_warning "Presiona Ctrl+C si necesitas cancelar."
                 echo ""
-                print_info "Descargando TODOS los datos..."
+                print_info "Descargando datos disponibles (sin Sitios Masivos)..."
                 
-                python src/etl.py --fuente all 2>&1 | tee logs/etl_download.log
+                # Modificado para excluir sitios-masivos
+                python src/etl.py --fuente comprasmx 2>&1 | tee logs/etl_download.log
+                python src/etl.py --fuente dof 2>&1 | tee -a logs/etl_download.log
+                python src/etl.py --fuente tianguis 2>&1 | tee -a logs/etl_download.log
                 
                 if [ ${PIPESTATUS[0]} -ne 0 ]; then
                     print_warning "El proceso terminó con advertencias. Revisa logs/etl_download.log"
@@ -605,7 +611,10 @@ case $COMMAND in
                 ;;
             2)
                 print_info "Procesando archivos existentes (sin descargar nuevos)..."
-                python src/etl.py --fuente all --solo-procesamiento
+                # Modificado para excluir sitios-masivos del procesamiento también
+                python src/etl.py --fuente comprasmx --solo-procesamiento
+                python src/etl.py --fuente dof --solo-procesamiento
+                python src/etl.py --fuente tianguis --solo-procesamiento
                 print_status "Procesamiento completado"
                 ;;
             3)
@@ -621,8 +630,8 @@ case $COMMAND in
                 python src/etl.py --fuente tianguis
                 ;;
             6)
-                print_info "Procesando Sitios Masivos..."
-                python src/etl.py --fuente sitios-masivos
+                print_error "Sitios Masivos está DESHABILITADO temporalmente"
+                print_info "Esta opción no está disponible en este momento"
                 ;;
             *)
                 print_error "Opción inválida"
@@ -648,7 +657,12 @@ case $COMMAND in
         source venv/bin/activate
         
         print_info "Procesando archivos existentes sin descargar nuevos..."
-        python src/etl.py --fuente all --solo-procesamiento
+        print_warning "Nota: Sitios Masivos está DESHABILITADO temporalmente"
+        
+        # Modificado para excluir sitios-masivos
+        python src/etl.py --fuente comprasmx --solo-procesamiento
+        python src/etl.py --fuente dof --solo-procesamiento
+        python src/etl.py --fuente tianguis --solo-procesamiento
         
         RECORDS=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT COUNT(*) FROM licitaciones;" 2>/dev/null || echo "0")
         print_status "Procesamiento completado: $RECORDS registros en la base de datos"
@@ -760,7 +774,7 @@ case $COMMAND in
         echo "  logs              - Muestra los logs del sistema"
         echo ""
         echo "GESTIÓN DE DATOS:"
-        echo "  download          - Descarga datos de las fuentes"
+        echo "  download          - Descarga datos de las fuentes (Sitios Masivos DESHABILITADO)"
         echo "  download-quick    - Solo procesa archivos existentes"
         echo "  reset-db          - Elimina y recrea la BD con esquema híbrido"
         echo ""
@@ -772,6 +786,8 @@ case $COMMAND in
         echo "SI HAY PROBLEMAS:"
         echo "  ./paloma.sh doctor            # Diagnostica y arregla automáticamente"
         echo "  ./paloma.sh reset-db          # Recrea BD con esquema híbrido correcto"
+        echo ""
+        echo "NOTA: Sitios Masivos está temporalmente DESHABILITADO"
         echo ""
         exit 1
         ;;
