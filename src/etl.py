@@ -16,6 +16,10 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
 
+# IMPORTANTE: Cargar variables de entorno desde .env
+from dotenv import load_dotenv
+load_dotenv()  # Esto carga el archivo .env con ANTHROPIC_API_KEY y otras variables
+
 # Agregar directorios al path
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent / "etl-process"))
