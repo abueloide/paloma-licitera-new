@@ -2,6 +2,7 @@
 """
 Scraper ComprasMX corregido para la estructura real de la API
 Captura TODOS los 1490+ expedientes navegando por las 15 páginas
++ NUEVA FUNCIONALIDAD: Extracción de detalles individuales
 """
 
 import asyncio
@@ -34,6 +35,12 @@ class ComprasMXScraper:
         self.pagina_actual = 1
         self.total_paginas = None
         self.total_registros = None
+        
+        # NUEVO: Para extracción de detalles individuales
+        self.detalles_extraidos = {}
+        self.carpeta_detalles = self.salida_dir / "detalles"
+        self.carpeta_detalles.mkdir(parents=True, exist_ok=True)
+        self.extraer_detalles = True  # Flag para habilitar/deshabilitar extracción de detalles
         
     def nombre_archivo(self, url: str, content_type: str, incluir_timestamp: bool = True) -> Path:
         """Genera un nombre estable y legible por URL + query."""
@@ -117,12 +124,277 @@ class ComprasMXScraper:
         except Exception as e:
             print(f"[ERROR] No se pudo procesar {url}: {e}")
     
+    async def procesar_licitaciones_en_pagina_actual(self, page):
+        """NUEVA FUNCIÓN: Procesa cada licitación individual de la página actual"""
+        if not self.extraer_detalles:
+            return
+            
+        print(f"\n=== EXTRAYENDO DETALLES INDIVIDUALES - PÁGINA {self.pagina_actual} ===")
+        
+        # Selectores para encontrar enlaces/botones de licitaciones
+        selectores_licitacion = [
+            "a[href*='expediente']",
+            "a[href*='procedimiento']",
+            "button:has-text('Ver detalle')",
+            "button:has-text('Ver')",
+            "a:has-text('Ver detalle')",
+            ".expediente-link",
+            ".licitacion-item a",
+            "tr[data-id] a",
+            "[data-expediente] a"
+        ]
+        
+        licitaciones_en_pagina = []
+        
+        # Buscar todos los posibles enlaces de licitaciones
+        for selector in selectores_licitacion:
+            try:
+                elementos = await page.locator(selector).all()
+                for elemento in elementos:
+                    if await elemento.is_visible():
+                        href = await elemento.get_attribute("href")
+                        texto = await elemento.text_content()
+                        
+                        if href and (href not in [l.get("href") for l in licitaciones_en_pagina]):
+                            licitaciones_en_pagina.append({
+                                "elemento": elemento,
+                                "href": href,
+                                "texto": texto.strip() if texto else "",
+                                "selector": selector
+                            })
+            except Exception as e:
+                print(f"  ⚠️ Error con selector {selector}: {e}")
+                continue
+        
+        print(f"  └─ Encontradas {len(licitaciones_en_pagina)} licitaciones potenciales en la página")
+        
+        # Procesar cada licitación individual
+        for i, licitacion in enumerate(licitaciones_en_pagina, 1):
+            try:
+                print(f"  \n[{i}/{len(licitaciones_en_pagina)}] Procesando: {licitacion['texto']}")
+                
+                # Obtener el código de expediente del href
+                codigo_expediente = self.extraer_codigo_expediente_de_url(licitacion['href'])
+                if not codigo_expediente:
+                    print(f"    ⚠️ No se pudo extraer código de expediente del URL: {licitacion['href']}")
+                    continue
+                
+                # Verificar si ya procesamos este detalle
+                if codigo_expediente in self.detalles_extraidos:
+                    print(f"    ✓ Detalle ya procesado: {codigo_expediente}")
+                    continue
+                
+                # Hacer click en la licitación
+                await licitacion['elemento'].click()
+                await page.wait_for_load_state("networkidle")
+                await page.wait_for_timeout(3000)
+                
+                # Capturar información de la página de detalle
+                url_completa = page.url
+                contenido_html = await page.content()
+                
+                # Extraer información estructurada de la página
+                informacion_extraida = await self.extraer_informacion_detalle(page)
+                
+                # Crear objeto de detalle
+                detalle = {
+                    "codigo_expediente": codigo_expediente,
+                    "url_completa_con_hash": url_completa,
+                    "contenido_html": contenido_html,
+                    "informacion_extraida": informacion_extraida,
+                    "timestamp_procesamiento": datetime.now().isoformat(),
+                    "procesado_exitosamente": True,
+                    "pagina_origen": self.pagina_actual
+                }
+                
+                # Guardar detalle individual
+                await self.guardar_detalle_individual(codigo_expediente, detalle)
+                self.detalles_extraidos[codigo_expediente] = detalle
+                
+                print(f"    ✓ Detalle extraído y guardado: {codigo_expediente}")
+                
+                # Volver al listado
+                await page.go_back()
+                await page.wait_for_load_state("networkidle")
+                await page.wait_for_timeout(2000)
+                
+                print(f"    ✓ Regresado al listado")
+                
+            except Exception as e:
+                print(f"    ❌ Error procesando licitación {i}: {e}")
+                
+                # Intentar volver al listado en caso de error
+                try:
+                    await page.go_back()
+                    await page.wait_for_timeout(2000)
+                except:
+                    # Si falla go_back, navegar directamente al listado
+                    await page.goto(
+                        "https://comprasmx.buengobierno.gob.mx/sitiopublico/#/",
+                        wait_until="domcontentloaded"
+                    )
+                    await page.wait_for_timeout(3000)
+                
+                continue
+        
+        print(f"  \n✓ Página {self.pagina_actual} completada. Detalles extraídos: {len(self.detalles_extraidos)}")
+    
+    def extraer_codigo_expediente_de_url(self, url: str) -> Optional[str]:
+        """Extrae el código de expediente de una URL"""
+        if not url:
+            return None
+        
+        # Patrones comunes para extraer código de expediente
+        patrones = [
+            r'/expediente/([^/?#]+)',
+            r'/procedimiento/([^/?#]+)', 
+            r'expediente=([^&/#]+)',
+            r'codigo=([^&/#]+)',
+            r'id=([^&/#]+)'
+        ]
+        
+        for patron in patrones:
+            match = re.search(patron, url)
+            if match:
+                return match.group(1)
+        
+        return None
+    
+    async def extraer_informacion_detalle(self, page) -> Dict:
+        """Extrae información estructurada de la página de detalle"""
+        try:
+            informacion = {
+                "descripcion_completa": "",
+                "documentos_adjuntos": [],
+                "fechas_detalladas": {},
+                "ubicacion_especifica": "",
+                "contacto": {},
+                "montos_detallados": {},
+                "requisitos": [],
+                "cronograma": []
+            }
+            
+            # Extraer descripción completa
+            try:
+                desc_selectores = [
+                    ".descripcion", ".description", 
+                    ".detalle", ".detail",
+                    ".contenido", ".content",
+                    "p:has-text('Descripción')",
+                    ".procedimiento-descripcion"
+                ]
+                
+                for selector in desc_selectores:
+                    elemento = page.locator(selector).first
+                    if await elemento.is_visible():
+                        texto = await elemento.text_content()
+                        if texto and len(texto.strip()) > 50:
+                            informacion["descripcion_completa"] = texto.strip()
+                            break
+            except:
+                pass
+            
+            # Extraer documentos adjuntos
+            try:
+                doc_selectores = [
+                    "a[href*='.pdf']",
+                    "a[href*='.doc']", 
+                    "a[href*='.xlsx']",
+                    ".documentos a",
+                    ".adjuntos a",
+                    ".archivos a"
+                ]
+                
+                for selector in doc_selectores:
+                    elementos = await page.locator(selector).all()
+                    for elemento in elementos:
+                        href = await elemento.get_attribute("href")
+                        texto = await elemento.text_content()
+                        if href:
+                            informacion["documentos_adjuntos"].append({
+                                "nombre": texto.strip() if texto else "Documento",
+                                "url": href
+                            })
+            except:
+                pass
+            
+            # Extraer fechas detalladas
+            try:
+                fecha_selectores = [
+                    ":has-text('Fecha')",
+                    ":has-text('fecha')",
+                    ".fecha", ".date",
+                    ".cronograma", ".timeline"
+                ]
+                
+                for selector in fecha_selectores:
+                    elementos = await page.locator(selector).all()
+                    for elemento in elementos:
+                        texto = await elemento.text_content()
+                        if texto and any(palabra in texto.lower() for palabra in ['fecha', 'plazo', 'vencimiento']):
+                            # Extraer fechas del texto
+                            fechas_encontradas = re.findall(r'\d{1,2}/\d{1,2}/\d{4}', texto)
+                            if fechas_encontradas:
+                                informacion["fechas_detalladas"][texto[:50]] = fechas_encontradas
+            except:
+                pass
+            
+            # Extraer información de contacto
+            try:
+                contacto_selectores = [
+                    ":has-text('Contacto')",
+                    ":has-text('contacto')",
+                    ":has-text('Email')",
+                    ":has-text('Teléfono')",
+                    ".contacto", ".contact"
+                ]
+                
+                for selector in contacto_selectores:
+                    elementos = await page.locator(selector).all()
+                    for elemento in elementos:
+                        texto = await elemento.text_content()
+                        if texto:
+                            # Extraer emails
+                            emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', texto)
+                            if emails:
+                                informacion["contacto"]["emails"] = emails
+                            
+                            # Extraer teléfonos
+                            telefonos = re.findall(r'\b\d{2,3}[-.\s]?\d{3,4}[-.\s]?\d{4}\b', texto)
+                            if telefonos:
+                                informacion["contacto"]["telefonos"] = telefonos
+            except:
+                pass
+            
+            return informacion
+            
+        except Exception as e:
+            print(f"    ⚠️ Error extrayendo información detallada: {e}")
+            return {}
+    
+    async def guardar_detalle_individual(self, codigo_expediente: str, detalle: Dict):
+        """Guarda el detalle individual en un archivo JSON"""
+        try:
+            # Limpiar código de expediente para nombre de archivo
+            codigo_limpio = re.sub(r'[^\w\-_.]', '_', codigo_expediente)
+            archivo_detalle = self.carpeta_detalles / f"detalle_{codigo_limpio}.json"
+            
+            with open(archivo_detalle, "w", encoding="utf-8") as f:
+                json.dump(detalle, f, ensure_ascii=False, indent=2)
+                
+        except Exception as e:
+            print(f"    ❌ Error guardando detalle {codigo_expediente}: {e}")
+    
     async def navegar_todas_las_paginas(self, page):
         """Navega por todas las páginas usando la información de paginación."""
         print("\n=== NAVEGANDO POR TODAS LAS PÁGINAS ===")
         
         # Esperar a que se cargue la primera página
         await page.wait_for_timeout(5000)
+        
+        # NUEVO: Procesar licitaciones de la primera página
+        if self.extraer_detalles:
+            await self.procesar_licitaciones_en_pagina_actual(page)
         
         # Si conocemos el total de páginas, navegar por todas
         if self.total_paginas and self.total_paginas > 1:
@@ -200,6 +472,10 @@ class ComprasMXScraper:
                     except:
                         pass
                 
+                # NUEVO: Procesar licitaciones de esta página
+                if self.extraer_detalles:
+                    await self.procesar_licitaciones_en_pagina_actual(page)
+                
                 # Verificar progreso
                 print(f"  └─ Expedientes capturados hasta ahora: {len(self.expedientes_ids)}/{self.total_registros}")
                 
@@ -230,6 +506,11 @@ class ComprasMXScraper:
                 
                 if len(self.expedientes_ids) > expedientes_antes:
                     print(f"  ✓ Intento {intento + 1}: Nuevos expedientes cargados")
+                    
+                    # NUEVO: Procesar licitaciones si hay nuevos datos
+                    if self.extraer_detalles:
+                        await self.procesar_licitaciones_en_pagina_actual(page)
+                        
                 else:
                     print(f"  ✗ Intento {intento + 1}: Sin nuevos datos")
                     if intento >= 2:
@@ -272,12 +553,15 @@ class ComprasMXScraper:
         print("  └─ No se encontró selector de cantidad (usando valor por defecto)")
         return False
     
-    async def ejecutar(self, headless: bool = True):
+    async def ejecutar(self, headless: bool = True, extraer_detalles: bool = True):
         """Ejecuta el scraper completo."""
+        self.extraer_detalles = extraer_detalles
+        
         print(f"\n{'='*60}")
         print(f"SCRAPER COMPRASMX - CAPTURA COMPLETA")
         print(f"Hora: {datetime.now()}")
         print(f"Modo: {'Headless' if headless else 'Visible'}")
+        print(f"Extraer detalles: {'Sí' if extraer_detalles else 'No'}")
         print(f"{'='*60}\n")
         
         async with async_playwright() as p:
@@ -346,13 +630,37 @@ class ComprasMXScraper:
             "total_registros_sistema": self.total_registros,
             "total_paginas_sistema": self.total_paginas,
             "porcentaje_capturado": (len(self.expedientes_ids) / self.total_registros * 100) if self.total_registros else 0,
-            "codigos_expedientes": sorted(list(self.expedientes_ids))
+            "codigos_expedientes": sorted(list(self.expedientes_ids)),
+            # NUEVO: Información de detalles extraídos
+            "detalles_extraidos": len(self.detalles_extraidos),
+            "porcentaje_detalles": (len(self.detalles_extraidos) / len(self.expedientes_ids) * 100) if self.expedientes_ids else 0
         }
         
         archivo_resumen = self.salida_dir / f"resumen_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         with open(archivo_resumen, "w", encoding="utf-8") as f:
             json.dump(resumen, f, ensure_ascii=False, indent=2)
         print(f"  └─ Resumen guardado en: {archivo_resumen.name}")
+        
+        # NUEVO: Guardar índice de detalles extraídos
+        if self.detalles_extraidos:
+            indice_detalles = {
+                "fecha_creacion": datetime.now().isoformat(),
+                "total_detalles": len(self.detalles_extraidos),
+                "detalles": {
+                    codigo: {
+                        "archivo": f"detalle_{re.sub(r'[^\\w\\-_.]', '_', codigo)}.json",
+                        "url_completa": detalle.get("url_completa_con_hash", ""),
+                        "procesado_en": detalle.get("timestamp_procesamiento", ""),
+                        "pagina_origen": detalle.get("pagina_origen", 0)
+                    }
+                    for codigo, detalle in self.detalles_extraidos.items()
+                }
+            }
+            
+            archivo_indice = self.carpeta_detalles / "indice_detalles.json"
+            with open(archivo_indice, "w", encoding="utf-8") as f:
+                json.dump(indice_detalles, f, ensure_ascii=False, indent=2)
+            print(f"  └─ Índice de detalles guardado en: {archivo_indice.name}")
     
     def mostrar_estadisticas(self):
         """Muestra estadísticas finales."""
@@ -365,6 +673,15 @@ class ComprasMXScraper:
             porcentaje = (len(self.expedientes_ids) / self.total_registros * 100)
             print(f"✓ Porcentaje capturado: {porcentaje:.1f}%")
         print(f"✓ Páginas procesadas: {self.pagina_actual}/{self.total_paginas}")
+        
+        # NUEVO: Estadísticas de detalles
+        if self.extraer_detalles:
+            print(f"✓ Detalles individuales extraídos: {len(self.detalles_extraidos)}")
+            if self.expedientes_ids:
+                porcentaje_detalles = (len(self.detalles_extraidos) / len(self.expedientes_ids) * 100)
+                print(f"✓ Cobertura de detalles: {porcentaje_detalles:.1f}%")
+            print(f"✓ Archivos de detalles en: {self.carpeta_detalles}")
+        
         print(f"✓ Archivos guardados en: {self.salida_dir.absolute()}")
         
         if self.expedientes_totales:
@@ -382,7 +699,8 @@ async def main():
     scraper = ComprasMXScraper()
     
     # Ejecutar con headless=False para ver el navegador (debug)
-    await scraper.ejecutar(headless=True)
+    # extraer_detalles=True para activar la nueva funcionalidad
+    await scraper.ejecutar(headless=True, extraer_detalles=True)
 
 
 if __name__ == "__main__":
