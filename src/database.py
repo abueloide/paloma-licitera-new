@@ -3,6 +3,7 @@
 """
 Gestión de Base de Datos para Paloma Licitera
 ACTUALIZADO: Manejo completo de detalles de ComprasMX extraídos por scraper v2
+CORREGIDO: Usar UUID real como hash_contenido, no SHA256 artificial
 """
 
 import psycopg2
@@ -113,8 +114,7 @@ class Database:
     
     def insertar_licitacion(self, licitacion: Dict[str, Any]) -> bool:
         """
-        Insertar una licitación en la BD con procesamiento completo para detalles de ComprasMX.
-        CORREGIDO: Manejo completo de datos específicos y logging mejorado.
+        CORREGIDO: Usar UUID real como hash_contenido para ComprasMX.
         """
         try:
             # Validaciones básicas
@@ -142,9 +142,19 @@ class Database:
             # NUEVO: Procesar detalles específicos completos de ComprasMX
             self._procesar_datos_especificos_completos(licitacion)
             
-            # Generar hash para deduplicación
-            hash_str = f"{licitacion['numero_procedimiento']}_{licitacion['entidad_compradora']}_{licitacion['fuente']}"
-            licitacion['hash_contenido'] = hashlib.sha256(hash_str.encode()).hexdigest()
+            # CORRECCIÓN PRINCIPAL: Usar UUID real como hash_contenido
+            fuente = licitacion.get('fuente', '')
+            uuid_procedimiento = licitacion.get('uuid_procedimiento')
+            
+            if fuente == 'ComprasMX' and uuid_procedimiento:
+                # Para ComprasMX: usar el UUID real directamente
+                licitacion['hash_contenido'] = uuid_procedimiento
+                logger.debug(f"Usando UUID real como hash: {uuid_procedimiento}")
+            else:
+                # Para otras fuentes: generar hash solo si no hay UUID
+                hash_str = f"{licitacion['numero_procedimiento']}_{licitacion['entidad_compradora']}_{licitacion['fuente']}"
+                licitacion['hash_contenido'] = hashlib.sha256(hash_str.encode()).hexdigest()
+                logger.debug(f"Generando hash artificial para {fuente}: {hash_str}")
             
             # Serializar datos originales si existen
             if 'datos_originales' in licitacion and licitacion['datos_originales'] is not None:
@@ -204,16 +214,15 @@ class Database:
                 cursor.execute(sql, licitacion)
                 result = cursor.fetchone()
                 if result:
-                    logger.debug(f"✅ Licitación insertada: {licitacion['numero_procedimiento']} (ID: {result['id']})")
+                    logger.debug(f"Licitación insertada: {licitacion['numero_procedimiento']} (ID: {result['id']})")
                     return True
                 else:
-                    logger.debug(f"🔄 Licitación duplicada (ya existe): {licitacion['numero_procedimiento']}")
+                    logger.debug(f"Licitación duplicada (ya existe): {licitacion['numero_procedimiento']}")
                     return False
                     
         except Exception as e:
-            # CAMBIO CRÍTICO: ERROR en lugar de DEBUG
-            logger.error(f"❌ Error insertando licitación {licitacion.get('numero_procedimiento', 'UNKNOWN')}: {e}")
-            logger.debug(f"🔍 Datos que causaron el error: {licitacion}")
+            logger.error(f"Error insertando licitación {licitacion.get('numero_procedimiento', 'UNKNOWN')}: {e}")
+            logger.debug(f"Datos que causaron el error: {licitacion}")
             return False
     
     def _procesar_campos_geograficos(self, licitacion: Dict[str, Any]):
@@ -317,7 +326,7 @@ class Database:
             # NUEVO: Procesar detalles individuales si existen
             detalle_individual = datos_especificos.get('detalle_individual')
             if detalle_individual:
-                logger.debug(f"🔍 Procesando detalle individual para {licitacion['numero_procedimiento']}")
+                logger.debug(f"Procesando detalle individual para {licitacion['numero_procedimiento']}")
                 
                 # Extraer información detallada
                 info_extraida = detalle_individual.get('informacion_extraida', {})
@@ -330,7 +339,7 @@ class Database:
                     # Usar la más larga y completa
                     if len(desc_completa) > len(desc_actual or ''):
                         licitacion['descripcion'] = desc_completa
-                        logger.debug(f"📝 Descripción enriquecida para {licitacion['numero_procedimiento']}")
+                        logger.debug(f"Descripción enriquecida para {licitacion['numero_procedimiento']}")
                 
                 # Agregar información específica del detalle
                 datos_especificos['detalle_individual'].update({
@@ -360,7 +369,7 @@ class Database:
                     'procesado_exitosamente': detalle_individual.get('procesado_exitosamente', False)
                 })
                 
-                logger.debug(f"✅ Detalle individual integrado para {licitacion['numero_procedimiento']}")
+                logger.debug(f"Detalle individual integrado para {licitacion['numero_procedimiento']}")
         
         elif fuente == 'DOF':
             datos_especificos.update({
@@ -492,7 +501,7 @@ if __name__ == "__main__":
     
     if len(sys.argv) > 1 and sys.argv[1] == "--setup":
         db.setup()
-        print("✅ Base de datos configurada con modelo híbrido y soporte completo para detalles")
+        print("Base de datos configurada con modelo híbrido y soporte completo para detalles")
     else:
         stats = db.obtener_estadisticas()
-        print(f"📊 Estadísticas: {stats}")
+        print(f"Estadísticas: {stats}")
