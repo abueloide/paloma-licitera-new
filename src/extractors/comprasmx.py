@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Extractor de ComprasMX - Portal de Compras del Gobierno Federal
-Versión simplificada sin Playwright (usando archivos JSON descargados)
+Versión extendida con soporte para detalles individuales
 """
 
 import json
@@ -16,19 +16,28 @@ from .base import BaseExtractor
 logger = logging.getLogger(__name__)
 
 class ComprasMXExtractor(BaseExtractor):
-    """Extractor para ComprasMX."""
+    """Extractor para ComprasMX con soporte para detalles individuales."""
     
     def __init__(self, config: Dict):
         super().__init__(config)
         self.data_dir = Path(config['paths']['data_raw']) / 'comprasmx'
         
+        # NUEVO: Carpeta de detalles individuales
+        self.carpeta_detalles = self.data_dir / 'detalles'
+        self.detalles_cargados = {}  # Cache de detalles por código de expediente
+        
     def extraer(self) -> List[Dict[str, Any]]:
         """Extraer licitaciones de archivos JSON de ComprasMX."""
         licitaciones = []
         
-        # Buscar archivos JSON
+        # 1. Cargar detalles individuales PRIMERO
+        if self.carpeta_detalles.exists():
+            self._cargar_detalles_individuales()
+        
+        # 2. Buscar archivos JSON principales
         json_files = list(self.data_dir.glob("*.json"))
         logger.info(f"Encontrados {len(json_files)} archivos JSON en {self.data_dir}")
+        logger.info(f"Cargados {len(self.detalles_cargados)} detalles individuales")
         
         for json_file in json_files:
             try:
@@ -37,6 +46,39 @@ class ComprasMXExtractor(BaseExtractor):
                 logger.error(f"Error procesando {json_file}: {e}")
                 
         return licitaciones
+    
+    def _cargar_detalles_individuales(self):
+        """NUEVA FUNCIÓN: Cargar todos los detalles individuales en memoria."""
+        logger.info(f"Cargando detalles individuales desde {self.carpeta_detalles}")
+        
+        # Cargar índice de detalles si existe
+        indice_path = self.carpeta_detalles / "indice_detalles.json"
+        if indice_path.exists():
+            try:
+                with open(indice_path, 'r', encoding='utf-8') as f:
+                    indice = json.load(f)
+                logger.info(f"Índice de detalles cargado: {indice.get('total_detalles', 0)} detalles")
+            except Exception as e:
+                logger.warning(f"Error cargando índice de detalles: {e}")
+        
+        # Cargar todos los archivos de detalles
+        archivos_detalle = list(self.carpeta_detalles.glob("detalle_*.json"))
+        logger.info(f"Encontrados {len(archivos_detalle)} archivos de detalle")
+        
+        for archivo_detalle in archivos_detalle:
+            try:
+                with open(archivo_detalle, 'r', encoding='utf-8') as f:
+                    detalle = json.load(f)
+                
+                codigo_expediente = detalle.get('codigo_expediente')
+                if codigo_expediente:
+                    self.detalles_cargados[codigo_expediente] = detalle
+                    logger.debug(f"Detalle cargado: {codigo_expediente}")
+                
+            except Exception as e:
+                logger.error(f"Error cargando detalle {archivo_detalle}: {e}")
+        
+        logger.info(f"✓ {len(self.detalles_cargados)} detalles individuales cargados en memoria")
     
     def _procesar_json(self, json_path: Path) -> List[Dict[str, Any]]:
         """Procesar un archivo JSON de ComprasMX."""
@@ -124,12 +166,17 @@ class ComprasMXExtractor(BaseExtractor):
         return licitaciones
     
     def _parsear_registro(self, registro: Dict) -> Dict[str, Any]:
-        """Parsear un registro de ComprasMX."""
+        """Parsear un registro de ComprasMX con integración de detalles individuales."""
         try:
             # Validar campos mínimos - el nuevo scraper usa 'cod_expediente'
             numero = registro.get('numero_procedimiento') or registro.get('cod_expediente', '')
             if not numero:
                 return None
+            
+            # NUEVO: Buscar detalles individuales para este expediente
+            detalle_individual = self.detalles_cargados.get(numero)
+            if detalle_individual:
+                logger.debug(f"✓ Detalle individual encontrado para {numero}")
             
             # Normalizar tipo de procedimiento
             tipo_proc_original = registro.get('tipo_procedimiento', '')
@@ -149,10 +196,15 @@ class ComprasMXExtractor(BaseExtractor):
             if not fecha_publicacion:
                 fecha_publicacion = datetime.now().date()
             
-            # Construir URL - el nuevo scraper puede tener diferentes formatos
+            # NUEVO: Construir URL con hash si disponible en detalles
             uuid = registro.get('uuid_procedimiento', '')
             url_original = registro.get('url_original')
-            if not url_original and uuid:
+            
+            # Priorizar URL con hash de los detalles individuales
+            if detalle_individual and detalle_individual.get('url_completa_con_hash'):
+                url_original = detalle_individual['url_completa_con_hash']
+                logger.debug(f"URL con hash encontrada: {url_original}")
+            elif not url_original and uuid:
                 url_original = f"https://comprasmx.buengobierno.gob.mx/procedimiento/{uuid}"
             elif not url_original:
                 url_original = "https://comprasmx.buengobierno.gob.mx/"
@@ -171,12 +223,20 @@ class ComprasMXExtractor(BaseExtractor):
                 except:
                     monto_estimado = None
             
+            # NUEVO: Enriquecer descripción con información detallada
+            descripcion = registro.get('descripcion', '')
+            if detalle_individual and detalle_individual.get('informacion_extraida', {}).get('descripcion_completa'):
+                desc_detallada = detalle_individual['informacion_extraida']['descripcion_completa']
+                if desc_detallada and len(desc_detallada) > len(descripcion or ''):
+                    descripcion = desc_detallada
+                    logger.debug(f"Descripción enriquecida para {numero}")
+            
             # Crear licitación normalizada
             licitacion = self.normalizar_licitacion(registro)
             licitacion.update({
                 'numero_procedimiento': numero,
                 'titulo': (registro.get('nombre_procedimiento') or registro.get('titulo', ''))[:500],
-                'descripcion': registro.get('descripcion'),
+                'descripcion': descripcion,
                 'entidad_compradora': registro.get('siglas') or registro.get('entidad_compradora', ''),
                 'unidad_compradora': registro.get('unidad_compradora'),
                 'tipo_procedimiento': tipo_proc,
@@ -193,11 +253,73 @@ class ComprasMXExtractor(BaseExtractor):
                 'uuid_procedimiento': uuid
             })
             
+            # NUEVO: Agregar detalles individuales a datos_especificos
+            if detalle_individual:
+                licitacion = self._integrar_detalle_individual(licitacion, registro, detalle_individual)
+            
             return licitacion
             
         except Exception as e:
             logger.debug(f"Error parseando registro: {e}")
             return None
+    
+    def _integrar_detalle_individual(self, licitacion: Dict, registro: Dict, detalle: Dict) -> Dict:
+        """NUEVA FUNCIÓN: Integrar información del detalle individual."""
+        try:
+            # Preparar datos específicos base de ComprasMX
+            datos_especificos = {
+                # Datos básicos del registro
+                'tipo_procedimiento': registro.get('tipo_procedimiento', licitacion.get('tipo_procedimiento')),
+                'caracter': registro.get('caracter', licitacion.get('caracter')),
+                'forma_procedimiento': registro.get('forma_procedimiento'),
+                'medio_utilizado': registro.get('medio_utilizado'),
+                'codigo_contrato': registro.get('codigo_contrato'),
+                'plantilla_convenio': registro.get('plantilla_convenio'),
+                'fecha_inicio_contrato': registro.get('fecha_inicio_contrato'),
+                'fecha_fin_contrato': registro.get('fecha_fin_contrato'),
+                'convenio_modificatorio': registro.get('convenio_modificatorio'),
+                'ramo': registro.get('ramo'),
+                'clave_programa': registro.get('clave_programa'),
+                'aportacion_federal': registro.get('aportacion_federal'),
+                'fecha_celebracion': registro.get('fecha_celebracion'),
+                'contrato_marco': registro.get('contrato_marco'),
+                'compra_consolidada': registro.get('compra_consolidada'),
+                'plurianual': registro.get('plurianual'),
+                'clave_cartera_shcp': registro.get('clave_cartera_shcp'),
+                
+                # NUEVO: Información del detalle individual
+                'detalle_individual': {
+                    'url_completa_hash': detalle.get('url_completa_con_hash'),
+                    'timestamp_procesamiento': detalle.get('timestamp_procesamiento'),
+                    'pagina_origen': detalle.get('pagina_origen'),
+                    'procesado_exitosamente': detalle.get('procesado_exitosamente', False)
+                }
+            }
+            
+            # Agregar información extraída del detalle
+            info_extraida = detalle.get('informacion_extraida', {})
+            if info_extraida:
+                datos_especificos['detalle_individual'].update({
+                    'descripcion_completa': info_extraida.get('descripcion_completa'),
+                    'documentos_adjuntos': info_extraida.get('documentos_adjuntos', []),
+                    'fechas_detalladas': info_extraida.get('fechas_detalladas', {}),
+                    'ubicacion_especifica': info_extraida.get('ubicacion_especifica'),
+                    'contacto': info_extraida.get('contacto', {}),
+                    'montos_detallados': info_extraida.get('montos_detallados', {}),
+                    'requisitos': info_extraida.get('requisitos', []),
+                    'cronograma': info_extraida.get('cronograma', [])
+                })
+            
+            # Actualizar licitación con datos específicos enriquecidos
+            licitacion['datos_especificos'] = datos_especificos
+            
+            logger.debug(f"✓ Detalle individual integrado para {licitacion['numero_procedimiento']}")
+            return licitacion
+            
+        except Exception as e:
+            logger.warning(f"Error integrando detalle individual para {licitacion.get('numero_procedimiento')}: {e}")
+            # En caso de error, continuar con datos básicos
+            return licitacion
     
     def _normalizar_tipo_procedimiento(self, tipo: str) -> str:
         """Normalizar tipo de procedimiento."""
