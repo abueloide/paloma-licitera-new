@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Gestión de Base de Datos para Paloma Licitera
-Actualizado para modelo híbrido con campos geográficos y datos específicos
+ACTUALIZADO: Manejo completo de detalles de ComprasMX extraídos por scraper v2
 """
 
 import psycopg2
@@ -18,7 +18,7 @@ import json
 logger = logging.getLogger(__name__)
 
 class Database:
-    """Gestor de base de datos PostgreSQL con modelo híbrido."""
+    """Gestor de base de datos PostgreSQL con modelo híbrido y detalles completos."""
     
     def __init__(self, config_path: str = "config.yaml"):
         with open(config_path, 'r') as f:
@@ -112,98 +112,108 @@ class Database:
             logger.info("Esquema de BD creado/verificado con modelo híbrido")
     
     def insertar_licitacion(self, licitacion: Dict[str, Any]) -> bool:
-        """Insertar una licitación en la BD con procesamiento para modelo híbrido."""
-        # Asegurar que los campos requeridos existen
-        if not licitacion.get('numero_procedimiento'):
-            logger.warning("Licitación sin numero_procedimiento, saltando")
-            return False
-        
-        if not licitacion.get('titulo'):
-            licitacion['titulo'] = licitacion.get('descripcion', 'Sin título')[:500]
-        
-        if not licitacion.get('entidad_compradora'):
-            licitacion['entidad_compradora'] = 'No especificada'
-        
-        if not licitacion.get('fuente'):
-            logger.error("Licitación sin fuente, no se puede insertar")
-            return False
-        
-        # Procesar campos geográficos según la fuente
-        self._procesar_campos_geograficos(licitacion)
-        
-        # Procesar datos específicos según la fuente
-        self._procesar_datos_especificos(licitacion)
-        
-        # Generar hash para deduplicación
-        hash_str = f"{licitacion['numero_procedimiento']}_{licitacion['entidad_compradora']}_{licitacion['fuente']}"
-        licitacion['hash_contenido'] = hashlib.sha256(hash_str.encode()).hexdigest()
-        
-        # Serializar datos originales si existen
-        if 'datos_originales' in licitacion and licitacion['datos_originales'] is not None:
-            if isinstance(licitacion['datos_originales'], (dict, list)):
-                licitacion['datos_originales'] = json.dumps(licitacion['datos_originales'])
-        else:
-            licitacion['datos_originales'] = None
-        
-        # Serializar datos específicos si existen
-        if 'datos_especificos' in licitacion and licitacion['datos_especificos'] is not None:
-            if isinstance(licitacion['datos_especificos'], (dict, list)):
-                licitacion['datos_especificos'] = json.dumps(licitacion['datos_especificos'])
-        else:
-            licitacion['datos_especificos'] = None
-        
-        # Asegurar que los campos opcionales existen (con None si no están)
-        campos_opcionales = [
-            'descripcion', 'unidad_compradora', 'tipo_procedimiento', 
-            'tipo_contratacion', 'estado', 'fecha_publicacion', 
-            'fecha_apertura', 'fecha_fallo', 'fecha_junta_aclaraciones',
-            'monto_estimado', 'moneda', 'proveedor_ganador', 
-            'caracter', 'uuid_procedimiento', 'url_original',
-            'entidad_federativa', 'municipio'
-        ]
-        
-        for campo in campos_opcionales:
-            if campo not in licitacion:
-                licitacion[campo] = None
-        
-        # Si moneda no está especificada, usar MXN por defecto
-        if not licitacion.get('moneda'):
-            licitacion['moneda'] = 'MXN'
-        
-        sql = """
-        INSERT INTO licitaciones (
-            numero_procedimiento, titulo, descripcion, entidad_compradora,
-            unidad_compradora, tipo_procedimiento, tipo_contratacion, estado,
-            fecha_publicacion, fecha_apertura, fecha_fallo, fecha_junta_aclaraciones,
-            monto_estimado, moneda, proveedor_ganador, caracter, uuid_procedimiento,
-            fuente, url_original, hash_contenido, datos_originales,
-            entidad_federativa, municipio, datos_especificos
-        ) VALUES (
-            %(numero_procedimiento)s, %(titulo)s, %(descripcion)s, %(entidad_compradora)s,
-            %(unidad_compradora)s, %(tipo_procedimiento)s, %(tipo_contratacion)s, %(estado)s,
-            %(fecha_publicacion)s, %(fecha_apertura)s, %(fecha_fallo)s, %(fecha_junta_aclaraciones)s,
-            %(monto_estimado)s, %(moneda)s, %(proveedor_ganador)s, %(caracter)s, %(uuid_procedimiento)s,
-            %(fuente)s, %(url_original)s, %(hash_contenido)s, %(datos_originales)s,
-            %(entidad_federativa)s, %(municipio)s, %(datos_especificos)s
-        )
-        ON CONFLICT (hash_contenido) DO NOTHING
-        RETURNING id;
         """
-        
+        Insertar una licitación en la BD con procesamiento completo para detalles de ComprasMX.
+        CORREGIDO: Manejo completo de datos específicos y logging mejorado.
+        """
         try:
+            # Validaciones básicas
+            if not licitacion.get('numero_procedimiento'):
+                logger.warning(f"Licitación sin numero_procedimiento, saltando: {licitacion}")
+                return False
+            
+            if not licitacion.get('titulo'):
+                licitacion['titulo'] = licitacion.get('descripcion', 'Sin título')[:500]
+            
+            if not licitacion.get('entidad_compradora'):
+                licitacion['entidad_compradora'] = 'No especificada'
+            
+            if not licitacion.get('fuente'):
+                logger.error(f"Licitación sin fuente, no se puede insertar: {licitacion.get('numero_procedimiento')}")
+                return False
+            
+            # CORRECCIÓN CRÍTICA: Normalizar fuente
+            if licitacion['fuente'] == 'COMPRASMX':
+                licitacion['fuente'] = 'ComprasMX'
+            
+            # Procesar campos geográficos según la fuente
+            self._procesar_campos_geograficos(licitacion)
+            
+            # NUEVO: Procesar detalles específicos completos de ComprasMX
+            self._procesar_datos_especificos_completos(licitacion)
+            
+            # Generar hash para deduplicación
+            hash_str = f"{licitacion['numero_procedimiento']}_{licitacion['entidad_compradora']}_{licitacion['fuente']}"
+            licitacion['hash_contenido'] = hashlib.sha256(hash_str.encode()).hexdigest()
+            
+            # Serializar datos originales si existen
+            if 'datos_originales' in licitacion and licitacion['datos_originales'] is not None:
+                if isinstance(licitacion['datos_originales'], (dict, list)):
+                    licitacion['datos_originales'] = json.dumps(licitacion['datos_originales'])
+            else:
+                licitacion['datos_originales'] = None
+            
+            # Serializar datos específicos si existen
+            if 'datos_especificos' in licitacion and licitacion['datos_especificos'] is not None:
+                if isinstance(licitacion['datos_especificos'], (dict, list)):
+                    licitacion['datos_especificos'] = json.dumps(licitacion['datos_especificos'])
+            else:
+                licitacion['datos_especificos'] = None
+            
+            # Asegurar que los campos opcionales existen (con None si no están)
+            campos_opcionales = [
+                'descripcion', 'unidad_compradora', 'tipo_procedimiento', 
+                'tipo_contratacion', 'estado', 'fecha_publicacion', 
+                'fecha_apertura', 'fecha_fallo', 'fecha_junta_aclaraciones',
+                'monto_estimado', 'moneda', 'proveedor_ganador', 
+                'caracter', 'uuid_procedimiento', 'url_original',
+                'entidad_federativa', 'municipio'
+            ]
+            
+            for campo in campos_opcionales:
+                if campo not in licitacion:
+                    licitacion[campo] = None
+            
+            # Si moneda no está especificada, usar MXN por defecto
+            if not licitacion.get('moneda'):
+                licitacion['moneda'] = 'MXN'
+            
+            # SQL para inserción
+            sql = """
+            INSERT INTO licitaciones (
+                numero_procedimiento, titulo, descripcion, entidad_compradora,
+                unidad_compradora, tipo_procedimiento, tipo_contratacion, estado,
+                fecha_publicacion, fecha_apertura, fecha_fallo, fecha_junta_aclaraciones,
+                monto_estimado, moneda, proveedor_ganador, caracter, uuid_procedimiento,
+                fuente, url_original, hash_contenido, datos_originales,
+                entidad_federativa, municipio, datos_especificos
+            ) VALUES (
+                %(numero_procedimiento)s, %(titulo)s, %(descripcion)s, %(entidad_compradora)s,
+                %(unidad_compradora)s, %(tipo_procedimiento)s, %(tipo_contratacion)s, %(estado)s,
+                %(fecha_publicacion)s, %(fecha_apertura)s, %(fecha_fallo)s, %(fecha_junta_aclaraciones)s,
+                %(monto_estimado)s, %(moneda)s, %(proveedor_ganador)s, %(caracter)s, %(uuid_procedimiento)s,
+                %(fuente)s, %(url_original)s, %(hash_contenido)s, %(datos_originales)s,
+                %(entidad_federativa)s, %(municipio)s, %(datos_especificos)s
+            )
+            ON CONFLICT (hash_contenido) DO NOTHING
+            RETURNING id;
+            """
+            
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(sql, licitacion)
                 result = cursor.fetchone()
                 if result:
-                    logger.debug(f"Licitación insertada: {licitacion['numero_procedimiento']}")
+                    logger.debug(f"✅ Licitación insertada: {licitacion['numero_procedimiento']} (ID: {result['id']})")
                     return True
                 else:
-                    logger.debug(f"Licitación duplicada: {licitacion['numero_procedimiento']}")
+                    logger.debug(f"🔄 Licitación duplicada (ya existe): {licitacion['numero_procedimiento']}")
                     return False
+                    
         except Exception as e:
-            logger.error(f"Error insertando licitación {licitacion.get('numero_procedimiento', 'UNKNOWN')}: {e}")
-            logger.debug(f"Datos que causaron el error: {licitacion}")
+            # CAMBIO CRÍTICO: ERROR en lugar de DEBUG
+            logger.error(f"❌ Error insertando licitación {licitacion.get('numero_procedimiento', 'UNKNOWN')}: {e}")
+            logger.debug(f"🔍 Datos que causaron el error: {licitacion}")
             return False
     
     def _procesar_campos_geograficos(self, licitacion: Dict[str, Any]):
@@ -218,17 +228,38 @@ class Database:
                 datos_orig = {}
         
         if fuente == 'ComprasMX':
-            # Mapear entidad_federativa_contratacion → entidad_federativa
-            if datos_orig.get('entidad_federativa_contratacion'):
-                licitacion['entidad_federativa'] = datos_orig['entidad_federativa_contratacion']
+            # Buscar en datos específicos si existen
+            datos_especificos = licitacion.get('datos_especificos', {})
+            if isinstance(datos_especificos, str):
+                try:
+                    datos_especificos = json.loads(datos_especificos)
+                except:
+                    datos_especificos = {}
+            
+            # Buscar en detalle individual si existe
+            detalle_individual = datos_especificos.get('detalle_individual', {})
+            info_extraida = detalle_individual.get('informacion_extraida', {}) if detalle_individual else {}
+            
+            # Mapear entidad federativa
+            entidad_fed = (
+                info_extraida.get('entidad_federativa') or 
+                datos_orig.get('entidad_federativa_contratacion') or
+                datos_especificos.get('entidad_federativa')
+            )
+            if entidad_fed:
+                licitacion['entidad_federativa'] = entidad_fed
             
             # Buscar municipio si existe
-            if datos_orig.get('municipio'):
-                licitacion['municipio'] = datos_orig['municipio']
+            municipio = (
+                info_extraida.get('municipio') or
+                datos_orig.get('municipio') or
+                datos_especificos.get('municipio')
+            )
+            if municipio:
+                licitacion['municipio'] = municipio
         
         elif fuente == 'DOF':
             # TODO: Usar el parser DOF para extraer ubicación
-            # Por ahora, dejar para procesamiento posterior
             pass
         
         elif fuente == 'Tianguis Digital':
@@ -240,8 +271,10 @@ class Database:
                 if address.get('locality'):
                     licitacion['municipio'] = address['locality']
     
-    def _procesar_datos_especificos(self, licitacion: Dict[str, Any]):
-        """Preparar datos específicos según la fuente."""
+    def _procesar_datos_especificos_completos(self, licitacion: Dict[str, Any]):
+        """
+        NUEVO: Procesar datos específicos completos incluyendo detalles individuales de ComprasMX.
+        """
         fuente = licitacion.get('fuente', '')
         datos_orig = licitacion.get('datos_originales', {})
         
@@ -251,8 +284,17 @@ class Database:
             except:
                 datos_orig = {}
         
+        # Obtener datos específicos existentes si ya fueron procesados
+        datos_especificos = licitacion.get('datos_especificos', {})
+        if isinstance(datos_especificos, str):
+            try:
+                datos_especificos = json.loads(datos_especificos)
+            except:
+                datos_especificos = {}
+        
         if fuente == 'ComprasMX':
-            licitacion['datos_especificos'] = {
+            # Datos básicos de ComprasMX
+            datos_especificos.update({
                 'tipo_procedimiento': datos_orig.get('tipo_procedimiento', licitacion.get('tipo_procedimiento')),
                 'caracter': datos_orig.get('caracter', licitacion.get('caracter')),
                 'forma_procedimiento': datos_orig.get('forma_procedimiento'),
@@ -270,28 +312,79 @@ class Database:
                 'compra_consolidada': datos_orig.get('compra_consolidada'),
                 'plurianual': datos_orig.get('plurianual'),
                 'clave_cartera_shcp': datos_orig.get('clave_cartera_shcp')
-            }
+            })
+            
+            # NUEVO: Procesar detalles individuales si existen
+            detalle_individual = datos_especificos.get('detalle_individual')
+            if detalle_individual:
+                logger.debug(f"🔍 Procesando detalle individual para {licitacion['numero_procedimiento']}")
+                
+                # Extraer información detallada
+                info_extraida = detalle_individual.get('informacion_extraida', {})
+                
+                # Actualizar descripción con versión completa si está disponible
+                if info_extraida.get('descripcion_completa'):
+                    desc_actual = licitacion.get('descripcion', '')
+                    desc_completa = info_extraida['descripcion_completa']
+                    
+                    # Usar la más larga y completa
+                    if len(desc_completa) > len(desc_actual or ''):
+                        licitacion['descripcion'] = desc_completa
+                        logger.debug(f"📝 Descripción enriquecida para {licitacion['numero_procedimiento']}")
+                
+                # Agregar información específica del detalle
+                datos_especificos['detalle_individual'].update({
+                    # Información de contacto
+                    'email_unidad_compradora': info_extraida.get('email_unidad_compradora'),
+                    'responsable_captura': info_extraida.get('responsable_captura'),
+                    
+                    # Información detallada del procedimiento
+                    'descripcion_detallada': info_extraida.get('descripcion_detallada'),
+                    'año_ejercicio': info_extraida.get('año_ejercicio'),
+                    
+                    # Cronograma detallado
+                    'fechas_cronograma': info_extraida.get('fechas_cronograma', {}),
+                    
+                    # Información técnica
+                    'partidas_especificas': info_extraida.get('partidas_especificas', []),
+                    'requisitos_economicos': info_extraida.get('requisitos_economicos', []),
+                    'documentos_anexos': info_extraida.get('documentos_anexos', []),
+                    
+                    # Datos adicionales específicos
+                    'datos_especificos_detalle': info_extraida.get('datos_especificos', {}),
+                    
+                    # Metadata del procesamiento
+                    'url_completa_hash': detalle_individual.get('url_completa_con_hash'),
+                    'timestamp_procesamiento': detalle_individual.get('timestamp_procesamiento'),
+                    'pagina_origen': detalle_individual.get('pagina_origen'),
+                    'procesado_exitosamente': detalle_individual.get('procesado_exitosamente', False)
+                })
+                
+                logger.debug(f"✅ Detalle individual integrado para {licitacion['numero_procedimiento']}")
         
         elif fuente == 'DOF':
-            licitacion['datos_especificos'] = {
+            datos_especificos.update({
                 'titulo_original': licitacion.get('titulo'),
                 'descripcion_original': licitacion.get('descripcion'),
                 'fecha_ejemplar': datos_orig.get('fecha_ejemplar'),
                 'seccion': datos_orig.get('seccion'),
                 'organismo': datos_orig.get('organismo'),
                 'notas': datos_orig.get('notas'),
-                'procesado_parser': False  # Marcar para procesamiento posterior
-            }
+                'procesado_parser': False
+            })
         
         elif fuente == 'Tianguis Digital':
-            licitacion['datos_especificos'] = {
+            datos_especificos.update({
                 'ocds_data': datos_orig if datos_orig.get('ocid') else None,
                 'classification': datos_orig.get('tender', {}).get('classification'),
                 'procuring_entity': datos_orig.get('tender', {}).get('procuringEntity'),
                 'items': datos_orig.get('tender', {}).get('items'),
                 'documents': datos_orig.get('tender', {}).get('documents'),
                 'milestones': datos_orig.get('tender', {}).get('milestones')
-            }
+            })
+        
+        # Actualizar datos específicos en la licitación
+        licitacion['datos_especificos'] = datos_especificos
     
     def obtener_licitaciones(self, filtros: Dict = None, limit: int = 100, offset: int = 0) -> List[Dict]:
         """Obtener licitaciones con filtros opcionales incluyendo campos geográficos."""
@@ -364,11 +457,31 @@ class Database:
             """)
             por_entidad_federativa = {row['entidad_federativa']: row['cantidad'] for row in cursor.fetchall()}
             
+            # Estadísticas de detalles de ComprasMX
+            cursor.execute("""
+                SELECT COUNT(*) as con_detalles
+                FROM licitaciones 
+                WHERE fuente = 'ComprasMX' 
+                AND datos_especificos IS NOT NULL
+                AND datos_especificos::text LIKE '%detalle_individual%'
+            """)
+            comprasmx_con_detalles = cursor.fetchone()['con_detalles']
+            
+            cursor.execute("""
+                SELECT COUNT(*) as total_comprasmx
+                FROM licitaciones 
+                WHERE fuente = 'ComprasMX'
+            """)
+            total_comprasmx = cursor.fetchone()['total_comprasmx']
+            
             return {
                 'total': total,
                 'por_fuente': por_fuente,
                 'por_estado': por_estado,
                 'por_entidad_federativa': por_entidad_federativa,
+                'comprasmx_con_detalles': comprasmx_con_detalles,
+                'comprasmx_total': total_comprasmx,
+                'porcentaje_detalles_comprasmx': (comprasmx_con_detalles / total_comprasmx * 100) if total_comprasmx > 0 else 0,
                 'ultima_actualizacion': datetime.now().isoformat()
             }
 
@@ -379,7 +492,7 @@ if __name__ == "__main__":
     
     if len(sys.argv) > 1 and sys.argv[1] == "--setup":
         db.setup()
-        print("✅ Base de datos configurada con modelo híbrido")
+        print("✅ Base de datos configurada con modelo híbrido y soporte completo para detalles")
     else:
         stats = db.obtener_estadisticas()
         print(f"📊 Estadísticas: {stats}")
