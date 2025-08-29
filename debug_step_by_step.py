@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 SCRIPT DE DEBUG - Analizar paso a paso qué está fallando
+CORREGIDO: Actualizar carpeta_detalles cuando se cambia data_dir
 """
 
 import json
@@ -70,6 +71,8 @@ def debug_extractor_paso_a_paso():
     
     extractor = ComprasMXExtractor(config_test)
     extractor.data_dir = test_dir
+    # CORREGIDO: También actualizar carpeta_detalles
+    extractor.carpeta_detalles = test_dir / 'detalles'
     
     print(f"📂 Data dir: {extractor.data_dir}")
     print(f"📂 Carpeta detalles: {extractor.carpeta_detalles}")
@@ -201,8 +204,13 @@ def main():
         
         extractor = ComprasMXExtractor(config_test)
         extractor.data_dir = test_dir_debug
+        # CORREGIDO: También actualizar carpeta_detalles
+        extractor.carpeta_detalles = test_dir_debug / 'detalles'
         
         print(f"\n🔄 Probando con datos debug...")
+        print(f"📂 Data dir corregido: {extractor.data_dir}")
+        print(f"📂 Carpeta detalles corregida: {extractor.carpeta_detalles}")
+        
         licitaciones = extractor.extraer()
         
         print(f"📊 Resultado: {len(licitaciones)} licitaciones")
