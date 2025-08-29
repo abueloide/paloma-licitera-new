@@ -3,7 +3,7 @@
 """
 Extractor de ComprasMX - Portal de Compras del Gobierno Federal
 Versión extendida con soporte para detalles individuales
-CORREGIDO: Rutas dinámicas para carpeta_detalles
+CORREGIDO: UUID real, fechas correctas, descripción completa
 """
 
 import json
@@ -172,71 +172,66 @@ class ComprasMXExtractor(BaseExtractor):
         return licitaciones
     
     def _parsear_registro(self, registro: Dict) -> Dict[str, Any]:
-        """Parsear un registro de ComprasMX con integración de detalles individuales."""
+        """CORREGIDO: Parsear registro con UUID real, fechas correctas y descripción completa."""
         try:
-            # Validar campos mínimos - el nuevo scraper usa 'cod_expediente'
+            # Validar campos mínimos
             numero = registro.get('numero_procedimiento') or registro.get('cod_expediente', '')
             if not numero:
                 return None
             
-            # CORREGIDO: Buscar detalles individuales usando AMBOS posibles códigos
-            detalle_individual = None
+            # CORRECCIÓN 1: USAR UUID REAL como hash_contenido, no SHA256 inventado
+            uuid = registro.get('uuid_procedimiento', '')
             
-            # Intentar buscar por cod_expediente primero (formato nuevo)
+            # CORRECCIÓN 2: FECHAS REALES - no inventar fechas
+            # Parsear fechas del documento original con formato estandarizado
+            fecha_publicacion = self._formatear_fecha_estandar(registro.get('fecha_publicacion'))
+            fecha_apertura = self._formatear_fecha_estandar(registro.get('fecha_apertura'))
+            fecha_aclaraciones = self._formatear_fecha_estandar(registro.get('fecha_aclaraciones'))
+            fecha_fallo = self._formatear_fecha_estandar(registro.get('fecha_fallo'))
+            
+            # CORRECCIÓN 3: DESCRIPCIÓN COMPLETA del campo correcto
+            # Buscar descripción detallada en varios campos posibles
+            descripcion = (
+                registro.get('descripcion_detallada_procedimiento') or
+                registro.get('descripcion_detallada') or 
+                registro.get('descripcion') or
+                ""
+            )
+            
+            # Buscar detalles individuales usando AMBOS códigos
+            detalle_individual = None
             if registro.get('cod_expediente'):
                 detalle_individual = self.detalles_cargados.get(registro['cod_expediente'])
-                if detalle_individual:
-                    logger.debug(f"✓ Detalle individual encontrado por cod_expediente: {registro['cod_expediente']}")
-            
-            # Si no se encontró, intentar por numero_procedimiento
             if not detalle_individual and registro.get('numero_procedimiento'):
                 detalle_individual = self.detalles_cargados.get(registro['numero_procedimiento'])
-                if detalle_individual:
-                    logger.debug(f"✓ Detalle individual encontrado por numero_procedimiento: {registro['numero_procedimiento']}")
-            
-            # Si aún no se encontró, intentar por el numero final que usaremos
             if not detalle_individual:
                 detalle_individual = self.detalles_cargados.get(numero)
-                if detalle_individual:
-                    logger.debug(f"✓ Detalle individual encontrado por numero final: {numero}")
             
-            # Normalizar tipo de procedimiento
-            tipo_proc_original = registro.get('tipo_procedimiento', '')
-            tipo_proc = self._normalizar_tipo_procedimiento(tipo_proc_original)
+            # Enriquecer descripción con detalles si están disponibles
+            if detalle_individual and detalle_individual.get('informacion_extraida', {}).get('descripcion_completa'):
+                desc_detallada = detalle_individual['informacion_extraida']['descripcion_completa']
+                if desc_detallada and len(desc_detallada) > len(descripcion):
+                    descripcion = desc_detallada
+                    logger.debug(f"Descripción enriquecida para {numero}")
             
-            # Normalizar tipo de contratación
-            tipo_cont_original = registro.get('tipo_contratacion', '')
-            tipo_cont = self._normalizar_tipo_contratacion(tipo_cont_original)
+            # Normalizar tipos
+            tipo_proc = self._normalizar_tipo_procedimiento(registro.get('tipo_procedimiento', ''))
+            tipo_cont = self._normalizar_tipo_contratacion(registro.get('tipo_contratacion', ''))
             
-            # Parsear fechas - el nuevo scraper puede tener más campos de fecha
-            fecha_apertura = self._parsear_fecha(registro.get('fecha_apertura'))
-            fecha_aclaraciones = self._parsear_fecha(registro.get('fecha_aclaraciones'))
-            fecha_fallo = self._parsear_fecha(registro.get('fecha_fallo'))
-            fecha_publicacion = self._parsear_fecha(registro.get('fecha_publicacion'))
-            
-            # Si no hay fecha de publicación, usar fecha actual
-            if not fecha_publicacion:
-                fecha_publicacion = datetime.now().date()
-            
-            # CORREGIDO: Construir URL con hash si disponible en detalles
-            uuid = registro.get('uuid_procedimiento', '')
+            # Construir URL original con hash real si está disponible
             url_original = registro.get('url_original')
-            
-            # Priorizar URL con hash de los detalles individuales
             if detalle_individual and detalle_individual.get('url_completa_con_hash'):
                 url_original = detalle_individual['url_completa_con_hash']
-                logger.debug(f"URL con hash aplicada: {url_original}")
             elif not url_original and uuid:
-                url_original = f"https://comprasmx.buengobierno.gob.mx/procedimiento/{uuid}"
-            elif not url_original:
-                url_original = "https://comprasmx.buengobierno.gob.mx/"
+                url_original = f"https://comprasmx.buengobierno.gob.mx/sitiopublico/#/sitiopublico/detalle/{uuid}/procedimiento"
+            else:
+                url_original = url_original or "https://comprasmx.buengobierno.gob.mx/"
             
-            # Extraer monto si está disponible
+            # Extraer monto
             monto_estimado = None
             monto_str = registro.get('monto_estimado') or registro.get('presupuesto_estimado')
-            if monto_str and isinstance(monto_str, (str, int, float)):
+            if monto_str:
                 try:
-                    # Limpiar y convertir monto
                     if isinstance(monto_str, str):
                         monto_limpio = monto_str.replace('$', '').replace(',', '').replace(' ', '')
                         monto_estimado = float(monto_limpio) if monto_limpio.replace('.', '').isdigit() else None
@@ -244,14 +239,6 @@ class ComprasMXExtractor(BaseExtractor):
                         monto_estimado = float(monto_str)
                 except:
                     monto_estimado = None
-            
-            # CORREGIDO: Enriquecer descripción con información detallada
-            descripcion = registro.get('descripcion', '')
-            if detalle_individual and detalle_individual.get('informacion_extraida', {}).get('descripcion_completa'):
-                desc_detallada = detalle_individual['informacion_extraida']['descripcion_completa']
-                if desc_detallada and len(desc_detallada) > len(descripcion or ''):
-                    descripcion = desc_detallada
-                    logger.debug(f"Descripción enriquecida para {numero} ({len(desc_detallada)} chars)")
             
             # Crear licitación normalizada
             licitacion = self.normalizar_licitacion(registro)
@@ -275,18 +262,45 @@ class ComprasMXExtractor(BaseExtractor):
                 'uuid_procedimiento': uuid
             })
             
-            # CORREGIDO: Agregar detalles individuales a datos_especificos
+            # Integrar detalles individuales si están disponibles
             if detalle_individual:
                 licitacion = self._integrar_detalle_individual(licitacion, registro, detalle_individual)
-                logger.debug(f"✓ Detalle individual integrado exitosamente para {numero}")
-            else:
-                logger.debug(f"⚠️ No se encontró detalle individual para {numero}")
+                logger.debug(f"✓ Detalle individual integrado para {numero}")
             
             return licitacion
             
         except Exception as e:
             logger.error(f"Error parseando registro: {e}")
             return None
+    
+    def _formatear_fecha_estandar(self, fecha_str: str) -> str:
+        """NUEVA FUNCIÓN: Formatear fechas al estándar común para todas las fuentes."""
+        if not fecha_str:
+            return "-"
+            
+        try:
+            # Formato ISO con hora (del JSON de ComprasMX)
+            if 'T' in fecha_str:
+                dt = datetime.fromisoformat(fecha_str.replace('Z', '+00:00'))
+                return dt.strftime('%d/%m/%Y %H:%M')
+                
+            # Formato DD/MM/YYYY, HH:MM horas (ya estándar)
+            if 'horas' in fecha_str:
+                return fecha_str.strip()
+                
+            # Formato YYYY-MM-DD (convertir a estándar)
+            if '-' in fecha_str and len(fecha_str.split('-')[0]) == 4:
+                dt = datetime.strptime(fecha_str.split(' ')[0], '%Y-%m-%d')
+                return dt.strftime('%d/%m/%Y')
+                
+            # Formato DD/MM/YYYY (ya estándar)
+            if '/' in fecha_str and len(fecha_str.split('/')) == 3:
+                return fecha_str.split(' ')[0]  # Solo fecha, sin hora extra
+                
+        except Exception as e:
+            logger.debug(f"Error formateando fecha '{fecha_str}': {e}")
+            
+        return "-"
     
     def _integrar_detalle_individual(self, licitacion: Dict, registro: Dict, detalle: Dict) -> Dict:
         """NUEVA FUNCIÓN: Integrar información del detalle individual."""
@@ -338,12 +352,10 @@ class ComprasMXExtractor(BaseExtractor):
             # Actualizar licitación con datos específicos enriquecidos
             licitacion['datos_especificos'] = datos_especificos
             
-            logger.debug(f"✓ Detalle individual integrado para {licitacion['numero_procedimiento']}")
             return licitacion
             
         except Exception as e:
             logger.warning(f"Error integrando detalle individual para {licitacion.get('numero_procedimiento')}: {e}")
-            # En caso de error, continuar con datos básicos
             return licitacion
     
     def _normalizar_tipo_procedimiento(self, tipo: str) -> str:
@@ -375,34 +387,6 @@ class ComprasMXExtractor(BaseExtractor):
             return 'OBRA_PUBLICA'
         else:
             return 'ADQUISICIONES'
-    
-    def _parsear_fecha(self, fecha_str: str) -> datetime:
-        """Parsear fecha desde diferentes formatos."""
-        if not fecha_str:
-            return None
-            
-        try:
-            # Formato ISO con hora
-            if 'T' in fecha_str:
-                return datetime.fromisoformat(fecha_str.replace('Z', '+00:00')).date()
-                
-            # Formato DD/MM/YYYY, HH:MM horas
-            if 'horas' in fecha_str:
-                fecha_parte = fecha_str.split(',')[0].strip()
-                return datetime.strptime(fecha_parte, '%d/%m/%Y').date()
-                
-            # Formato YYYY-MM-DD
-            if '-' in fecha_str and len(fecha_str.split('-')[0]) == 4:
-                return datetime.strptime(fecha_str.split(' ')[0], '%Y-%m-%d').date()
-                
-            # Formato DD/MM/YYYY
-            if '/' in fecha_str:
-                return datetime.strptime(fecha_str.split(' ')[0], '%d/%m/%Y').date()
-                
-        except Exception as e:
-            logger.debug(f"Error parseando fecha '{fecha_str}': {e}")
-            
-        return None
     
     def _normalizar_estado(self, estado: str) -> str:
         """Normalizar estado del procedimiento."""
