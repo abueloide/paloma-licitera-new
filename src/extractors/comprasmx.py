@@ -4,12 +4,13 @@
 Extractor de ComprasMX - Portal de Compras del Gobierno Federal
 Versión extendida con soporte para detalles individuales
 CORREGIDO: UUID real, fechas correctas, descripción completa
+CRÍTICO: Manejo correcto de fechas para PostgreSQL
 """
 
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from datetime import datetime
 
 from .base import BaseExtractor
@@ -182,12 +183,12 @@ class ComprasMXExtractor(BaseExtractor):
             # CORRECCIÓN 1: USAR UUID REAL como hash_contenido, no SHA256 inventado
             uuid = registro.get('uuid_procedimiento', '')
             
-            # CORRECCIÓN 2: FECHAS REALES - no inventar fechas
+            # CORRECCIÓN CRÍTICA: FECHAS VÁLIDAS PARA POSTGRESQL - NO MÁS STRINGS "-"
             # Parsear fechas del documento original con formato estandarizado
-            fecha_publicacion = self._formatear_fecha_estandar(registro.get('fecha_publicacion'))
-            fecha_apertura = self._formatear_fecha_estandar(registro.get('fecha_apertura'))
-            fecha_aclaraciones = self._formatear_fecha_estandar(registro.get('fecha_aclaraciones'))
-            fecha_fallo = self._formatear_fecha_estandar(registro.get('fecha_fallo'))
+            fecha_publicacion = self._parsear_fecha_postgresql(registro.get('fecha_publicacion'))
+            fecha_apertura = self._parsear_fecha_postgresql(registro.get('fecha_apertura'))
+            fecha_aclaraciones = self._parsear_fecha_postgresql(registro.get('fecha_aclaraciones'))
+            fecha_fallo = self._parsear_fecha_postgresql(registro.get('fecha_fallo'))
             
             # CORRECCIÓN 3: DESCRIPCIÓN COMPLETA del campo correcto
             # Buscar descripción detallada en varios campos posibles
@@ -273,34 +274,46 @@ class ComprasMXExtractor(BaseExtractor):
             logger.error(f"Error parseando registro: {e}")
             return None
     
-    def _formatear_fecha_estandar(self, fecha_str: str) -> str:
-        """NUEVA FUNCIÓN: Formatear fechas al estándar común para todas las fuentes."""
-        if not fecha_str:
-            return "-"
+    def _parsear_fecha_postgresql(self, fecha_str: str) -> Optional[str]:
+        """
+        FUNCIÓN CRÍTICA CORREGIDA: Parsear fechas compatibles con PostgreSQL.
+        
+        IMPORTANTE: Retorna None (NULL) en lugar de "-" cuando no se puede parsear.
+        PostgreSQL requiere fechas válidas o NULL, NO strings con guiones.
+        """
+        if not fecha_str or fecha_str == "-" or fecha_str.strip() == "":
+            return None
             
         try:
             # Formato ISO con hora (del JSON de ComprasMX)
             if 'T' in fecha_str:
                 dt = datetime.fromisoformat(fecha_str.replace('Z', '+00:00'))
-                return dt.strftime('%d/%m/%Y %H:%M')
+                return dt.strftime('%Y-%m-%d')  # Formato ISO para PostgreSQL
                 
-            # Formato DD/MM/YYYY, HH:MM horas (ya estándar)
-            if 'horas' in fecha_str:
-                return fecha_str.strip()
+            # Formato DD/MM/YYYY HH:MM (convertir a ISO)
+            if '/' in fecha_str and len(fecha_str.split('/')) >= 3:
+                # Extraer solo la parte de fecha
+                fecha_parte = fecha_str.split(' ')[0] if ' ' in fecha_str else fecha_str
+                partes = fecha_parte.split('/')
+                if len(partes) == 3:
+                    dia, mes, año = partes
+                    if len(año) == 4 and dia.isdigit() and mes.isdigit():
+                        return f"{año}-{mes.zfill(2)}-{dia.zfill(2)}"  # Formato ISO
                 
-            # Formato YYYY-MM-DD (convertir a estándar)
+            # Formato YYYY-MM-DD (ya compatible con PostgreSQL)
             if '-' in fecha_str and len(fecha_str.split('-')[0]) == 4:
-                dt = datetime.strptime(fecha_str.split(' ')[0], '%Y-%m-%d')
-                return dt.strftime('%d/%m/%Y')
-                
-            # Formato DD/MM/YYYY (ya estándar)
-            if '/' in fecha_str and len(fecha_str.split('/')) == 3:
-                return fecha_str.split(' ')[0]  # Solo fecha, sin hora extra
+                fecha_parte = fecha_str.split(' ')[0]  # Solo fecha, sin hora
+                partes = fecha_parte.split('-')
+                if len(partes) == 3 and all(p.isdigit() for p in partes):
+                    año, mes, dia = partes
+                    if len(año) == 4:
+                        return f"{año}-{mes.zfill(2)}-{dia.zfill(2)}"
                 
         except Exception as e:
-            logger.debug(f"Error formateando fecha '{fecha_str}': {e}")
+            logger.debug(f"Error parseando fecha '{fecha_str}': {e}")
             
-        return "-"
+        # CRÍTICO: Retornar None (NULL) en lugar de "-" para evitar errores SQL
+        return None
     
     def _integrar_detalle_individual(self, licitacion: Dict, registro: Dict, detalle: Dict) -> Dict:
         """NUEVA FUNCIÓN: Integrar información del detalle individual."""
