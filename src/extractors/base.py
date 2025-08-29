@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Extractor Base - Clase abstracta para todos los extractores
+CORREGIDO: Fuentes con nombres correctos
 """
 
 from abc import ABC, abstractmethod
@@ -15,7 +16,17 @@ class BaseExtractor(ABC):
     
     def __init__(self, config: Dict):
         self.config = config
-        self.fuente = self.__class__.__name__.replace('Extractor', '').upper()
+        # CORRECCIÓN CRÍTICA: Mapear fuentes a nombres correctos
+        class_name = self.__class__.__name__.replace('Extractor', '')
+        
+        # Mapear nombres de clase a fuentes correctas para BD
+        fuente_mapping = {
+            'ComprasMX': 'ComprasMX',
+            'DOF': 'DOF', 
+            'Tianguis': 'Tianguis Digital'
+        }
+        
+        self.fuente = fuente_mapping.get(class_name, class_name.upper())
         
     @abstractmethod
     def extraer(self) -> List[Dict[str, Any]]:
