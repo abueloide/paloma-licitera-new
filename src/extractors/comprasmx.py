@@ -3,7 +3,7 @@
 """
 Extractor de ComprasMX - Portal de Compras del Gobierno Federal
 Versión extendida con soporte para detalles individuales
-CORREGIDO: Bug de integración de detalles
+CORREGIDO: Rutas dinámicas para carpeta_detalles
 """
 
 import json
@@ -22,10 +22,12 @@ class ComprasMXExtractor(BaseExtractor):
     def __init__(self, config: Dict):
         super().__init__(config)
         self.data_dir = Path(config['paths']['data_raw']) / 'comprasmx'
-        
-        # NUEVO: Carpeta de detalles individuales
-        self.carpeta_detalles = self.data_dir / 'detalles'
         self.detalles_cargados = {}  # Cache de detalles por código de expediente
+    
+    @property
+    def carpeta_detalles(self) -> Path:
+        """CORREGIDO: Carpeta de detalles que se actualiza dinámicamente con data_dir"""
+        return self.data_dir / 'detalles'
         
     def extraer(self) -> List[Dict[str, Any]]:
         """Extraer licitaciones de archivos JSON de ComprasMX."""
@@ -51,6 +53,9 @@ class ComprasMXExtractor(BaseExtractor):
     def _cargar_detalles_individuales(self):
         """NUEVA FUNCIÓN: Cargar todos los detalles individuales en memoria."""
         logger.info(f"Cargando detalles individuales desde {self.carpeta_detalles}")
+        
+        # Limpiar caché anterior
+        self.detalles_cargados = {}
         
         # Cargar índice de detalles si existe
         indice_path = self.carpeta_detalles / "indice_detalles.json"
