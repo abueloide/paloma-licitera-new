@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Orquestador ETL Principal - Paloma Licitera
-Integra scrapers con extracción DOF usando IA (Claude Haiku)
+CORREGIDO: Logging mejorado y manejo robusto de detalles ComprasMX
 """
 
 import logging
@@ -77,7 +77,7 @@ class ETL:
         resultados = {
             'inicio': datetime.now(),
             'fuentes': {},
-            'totales': {'extraidos': 0, 'insertados': 0, 'errores': 0}
+            'totales': {'extraidos': 0, 'insertados': 0, 'errores': 0, 'duplicados': 0}
         }
         
         # 1. FASE DE SCRAPING
@@ -293,6 +293,7 @@ class ETL:
                 resultados['totales']['extraidos'] += resultado_fuente['extraidos']
                 resultados['totales']['insertados'] += resultado_fuente['insertados']
                 resultados['totales']['errores'] += resultado_fuente['errores']
+                resultados['totales']['duplicados'] += resultado_fuente.get('duplicados', 0)
     
     def _procesar_dof_ai_files(self, resultados: Dict):
         """Procesar archivos JSON generados por el extractor DOF con IA."""
@@ -316,7 +317,8 @@ class ETL:
         resultado_dof = {
             'extraidos': 0,
             'insertados': 0,
-            'errores': 0
+            'errores': 0,
+            'duplicados': 0
         }
         
         for json_file in json_files:
@@ -331,8 +333,10 @@ class ETL:
                     try:
                         if self.db.insertar_licitacion(lic):
                             resultado_dof['insertados'] += 1
+                        else:
+                            resultado_dof['duplicados'] += 1
                     except Exception as e:
-                        logger.debug(f"Error insertando: {e}")
+                        logger.error(f"Error insertando licitación DOF: {e}")
                         resultado_dof['errores'] += 1
                 
             except Exception as e:
@@ -344,35 +348,83 @@ class ETL:
         resultados['totales']['extraidos'] += resultado_dof['extraidos']
         resultados['totales']['insertados'] += resultado_dof['insertados']
         resultados['totales']['errores'] += resultado_dof['errores']
+        resultados['totales']['duplicados'] += resultado_dof['duplicados']
     
     def _procesar_fuente(self, nombre_fuente: str) -> Dict:
-        """Procesar una fuente específica e insertar en BD."""
+        """CORREGIDO: Procesar una fuente específica con logging detallado."""
         logger.info(f"🔄 Procesando fuente: {nombre_fuente}")
         extractor = self.file_processors[nombre_fuente]
         
         resultado = {
             'extraidos': 0,
             'insertados': 0,
-            'errores': 0
+            'errores': 0,
+            'duplicados': 0
         }
         
         try:
+            # Extraer licitaciones
+            logger.info(f"   📊 Iniciando extracción de {nombre_fuente}...")
             licitaciones = extractor.extraer()
             resultado['extraidos'] = len(licitaciones)
-            logger.info(f"   📊 Extraídas {len(licitaciones)} licitaciones")
+            logger.info(f"   📊 Extraídas {len(licitaciones)} licitaciones de {nombre_fuente}")
             
-            for licitacion in licitaciones:
+            if len(licitaciones) == 0:
+                logger.warning(f"   ⚠️ No se extrajeron licitaciones de {nombre_fuente}")
+                return resultado
+            
+            # Contadores para logging detallado
+            contador_exitosas = 0
+            contador_duplicadas = 0
+            contador_errores = 0
+            
+            # Insertar licitaciones con progreso
+            logger.info(f"   💾 Iniciando inserción en BD...")
+            for i, licitacion in enumerate(licitaciones, 1):
                 try:
-                    if self.db.insertar_licitacion(licitacion):
-                        resultado['insertados'] += 1
-                except Exception as e:
-                    logger.debug(f"Error insertando: {e}")
-                    resultado['errores'] += 1
-            
-            logger.info(f"   💾 Insertadas {resultado['insertados']} licitaciones")
+                    # Validar campos críticos
+                    if not licitacion.get('numero_procedimiento'):
+                        logger.warning(f"   ⚠️ Licitación {i} sin número de procedimiento, saltando")
+                        contador_errores += 1
+                        continue
                     
+                    # Intentar insertar
+                    insercion_exitosa = self.db.insertar_licitacion(licitacion)
+                    
+                    if insercion_exitosa:
+                        contador_exitosas += 1
+                        if contador_exitosas % 500 == 0:  # Log cada 500 insertadas
+                            logger.info(f"   💾 Progreso: {contador_exitosas}/{i} insertadas ({(i/len(licitaciones)*100):.1f}%)")
+                    else:
+                        contador_duplicadas += 1
+                        
+                except Exception as e:
+                    contador_errores += 1
+                    # CAMBIO CRÍTICO: ERROR en lugar de DEBUG
+                    logger.error(f"   ❌ Error insertando licitación {i} ({licitacion.get('numero_procedimiento', 'UNKNOWN')}): {e}")
+            
+            # Actualizar resultados
+            resultado['insertados'] = contador_exitosas
+            resultado['duplicados'] = contador_duplicadas
+            resultado['errores'] = contador_errores
+            
+            # Log final detallado
+            logger.info(f"   ✅ {nombre_fuente} COMPLETADO:")
+            logger.info(f"      📊 Extraídas: {resultado['extraidos']}")
+            logger.info(f"      💾 Insertadas: {resultado['insertados']}")
+            logger.info(f"      🔄 Duplicadas: {resultado['duplicados']}")
+            logger.info(f"      ❌ Errores: {resultado['errores']}")
+            
+            # Análisis de resultados
+            if resultado['insertados'] == 0 and resultado['duplicados'] > 0:
+                logger.info(f"   ℹ️ Todas las licitaciones de {nombre_fuente} ya estaban en BD")
+            elif resultado['errores'] > resultado['insertados']:
+                logger.warning(f"   ⚠️ {nombre_fuente} tuvo más errores ({resultado['errores']}) que inserciones exitosas ({resultado['insertados']})")
+            elif resultado['insertados'] > 0:
+                logger.info(f"   🎉 {nombre_fuente}: {resultado['insertados']} nuevas licitaciones agregadas a la BD")
+                
         except Exception as e:
-            logger.error(f"Error procesando {nombre_fuente}: {e}")
+            logger.error(f"   ❌ Error crítico procesando {nombre_fuente}: {e}")
             resultado['errores'] += 1
             
         return resultado
@@ -391,7 +443,8 @@ class ETL:
         resultado_zip = {
             'extraidos': 0,
             'insertados': 0,
-            'errores': 0
+            'errores': 0,
+            'duplicados': 0
         }
         
         for zip_file in zip_files:
@@ -402,6 +455,8 @@ class ETL:
                 for licitacion in licitaciones:
                     if self.db.insertar_licitacion(licitacion):
                         resultado_zip['insertados'] += 1
+                    else:
+                        resultado_zip['duplicados'] += 1
                         
             except Exception as e:
                 logger.error(f"Error procesando ZIP {zip_file}: {e}")
@@ -411,13 +466,14 @@ class ETL:
         resultados['totales']['extraidos'] += resultado_zip['extraidos']
         resultados['totales']['insertados'] += resultado_zip['insertados']
         resultados['totales']['errores'] += resultado_zip['errores']
+        resultados['totales']['duplicados'] += resultado_zip['duplicados']
 
 
 def main():
     """Función principal."""
     import argparse
     
-    parser = argparse.ArgumentParser(description='ETL Paloma Licitera con IA')
+    parser = argparse.ArgumentParser(description='ETL Paloma Licitera con detalles completos')
     parser.add_argument(
         '--fuente',
         choices=['all', 'comprasmx', 'dof', 'tianguis', 'zip'],
@@ -460,9 +516,20 @@ def main():
 ═══════════════
 📊 Extraídos: {resultados['totales']['extraidos']}
 💾 Insertados: {resultados['totales']['insertados']}
+🔄 Duplicados: {resultados['totales']['duplicados']}
 ❌ Errores: {resultados['totales']['errores']}
 ⏱️ Duración: {resultados['duracion']}
         """)
+        
+        # Mostrar desglose por fuente
+        for fuente_key, stats in resultados['fuentes'].items():
+            if '_procesamiento' in fuente_key:
+                fuente_name = fuente_key.replace('_procesamiento', '').upper()
+                print(f"📋 {fuente_name}:")
+                print(f"    Extraídas: {stats['extraidos']}")
+                print(f"    Insertadas: {stats['insertados']}")
+                print(f"    Duplicadas: {stats.get('duplicados', 0)}")
+                print(f"    Errores: {stats['errores']}")
         
         # Mostrar info de DOF con IA si se usó
         if 'dof_ai_procesamiento' in resultados['fuentes']:
