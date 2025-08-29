@@ -2,7 +2,7 @@
 """
 Scraper ComprasMX corregido para la estructura real de la API
 Captura TODOS los 1490+ expedientes navegando por las 15 páginas
-+ NUEVA FUNCIONALIDAD: Extracción de detalles individuales
++ FUNCIONALIDAD CORREGIDA: Extracción de detalles individuales usando estructura real de tabla
 """
 
 import asyncio
@@ -125,76 +125,80 @@ class ComprasMXScraper:
             print(f"[ERROR] No se pudo procesar {url}: {e}")
     
     async def procesar_licitaciones_en_pagina_actual(self, page):
-        """NUEVA FUNCIÓN: Procesa cada licitación individual de la página actual"""
+        """FUNCIÓN CORREGIDA: Procesa cada licitación individual usando la estructura real de tabla"""
         if not self.extraer_detalles:
             return
             
         print(f"\n=== EXTRAYENDO DETALLES INDIVIDUALES - PÁGINA {self.pagina_actual} ===")
         
-        # Selectores para encontrar enlaces/botones de licitaciones
-        selectores_licitacion = [
-            "a[href*='expediente']",
-            "a[href*='procedimiento']",
-            "button:has-text('Ver detalle')",
-            "button:has-text('Ver')",
-            "a:has-text('Ver detalle')",
-            ".expediente-link",
-            ".licitacion-item a",
-            "tr[data-id] a",
-            "[data-expediente] a"
-        ]
+        # CORREGIDO: ComprasMX usa una tabla con filas clickeables
+        # Buscar todas las filas de la tabla de licitaciones
+        try:
+            # Esperar a que la tabla se cargue
+            await page.wait_for_selector("table", timeout=10000)
+            
+            # Obtener todas las filas de la tabla (excluyendo header)
+            filas_tabla = await page.locator("table tbody tr, table tr:not(:first-child)").all()
+            
+            if not filas_tabla:
+                # Fallback: buscar cualquier fila de tabla
+                filas_tabla = await page.locator("tr").all()
+                # Filtrar header si existe
+                filas_filtradas = []
+                for fila in filas_tabla:
+                    texto = await fila.text_content()
+                    if texto and not ("Núm." in texto and "Número de identificación" in texto):
+                        filas_filtradas.append(fila)
+                filas_tabla = filas_filtradas
+            
+            print(f"  └─ Encontradas {len(filas_tabla)} filas de licitaciones en la tabla")
+            
+        except Exception as e:
+            print(f"  ❌ Error localizando tabla de licitaciones: {e}")
+            return
         
-        licitaciones_en_pagina = []
-        
-        # Buscar todos los posibles enlaces de licitaciones
-        for selector in selectores_licitacion:
+        # Procesar cada fila de licitación individual
+        for i, fila in enumerate(filas_tabla, 1):
             try:
-                elementos = await page.locator(selector).all()
-                for elemento in elementos:
-                    if await elemento.is_visible():
-                        href = await elemento.get_attribute("href")
-                        texto = await elemento.text_content()
-                        
-                        if href and (href not in [l.get("href") for l in licitaciones_en_pagina]):
-                            licitaciones_en_pagina.append({
-                                "elemento": elemento,
-                                "href": href,
-                                "texto": texto.strip() if texto else "",
-                                "selector": selector
-                            })
-            except Exception as e:
-                print(f"  ⚠️ Error con selector {selector}: {e}")
-                continue
-        
-        print(f"  └─ Encontradas {len(licitaciones_en_pagina)} licitaciones potenciales en la página")
-        
-        # Procesar cada licitación individual
-        for i, licitacion in enumerate(licitaciones_en_pagina, 1):
-            try:
-                print(f"  \n[{i}/{len(licitaciones_en_pagina)}] Procesando: {licitacion['texto']}")
-                
-                # Obtener el código de expediente del href
-                codigo_expediente = self.extraer_codigo_expediente_de_url(licitacion['href'])
-                if not codigo_expediente:
-                    print(f"    ⚠️ No se pudo extraer código de expediente del URL: {licitacion['href']}")
+                # Extraer texto de la fila para identificación
+                texto_fila = await fila.text_content()
+                if not texto_fila or len(texto_fila.strip()) < 10:
                     continue
+                
+                # Extraer código de expediente de la segunda columna (índice 1)
+                celdas = await fila.locator("td").all()
+                codigo_expediente = ""
+                nombre_procedimiento = ""
+                
+                if len(celdas) >= 4:  # Asegurarse que tiene suficientes columnas
+                    # Segunda columna: Número de identificación
+                    codigo_expediente = (await celdas[1].text_content()).strip()
+                    # Cuarta columna: Nombre del procedimiento
+                    nombre_procedimiento = (await celdas[3].text_content()).strip()
+                
+                if not codigo_expediente:
+                    print(f"  ⚠️ No se pudo extraer código de expediente de la fila {i}")
+                    continue
+                
+                print(f"  \n[{i}/{len(filas_tabla)}] Procesando: {codigo_expediente}")
+                print(f"    └─ {nombre_procedimiento[:80]}{'...' if len(nombre_procedimiento) > 80 else ''}")
                 
                 # Verificar si ya procesamos este detalle
                 if codigo_expediente in self.detalles_extraidos:
                     print(f"    ✓ Detalle ya procesado: {codigo_expediente}")
                     continue
                 
-                # Hacer click en la licitación
-                await licitacion['elemento'].click()
+                # Hacer click en la fila para abrir el detalle
+                await fila.click()
                 await page.wait_for_load_state("networkidle")
-                await page.wait_for_timeout(3000)
+                await page.wait_for_timeout(4000)
                 
                 # Capturar información de la página de detalle
                 url_completa = page.url
                 contenido_html = await page.content()
                 
                 # Extraer información estructurada de la página
-                informacion_extraida = await self.extraer_informacion_detalle(page)
+                informacion_extraida = await self.extraer_informacion_detalle_comprasmx(page)
                 
                 # Crear objeto de detalle
                 detalle = {
@@ -239,137 +243,254 @@ class ComprasMXScraper:
         
         print(f"  \n✓ Página {self.pagina_actual} completada. Detalles extraídos: {len(self.detalles_extraidos)}")
     
-    def extraer_codigo_expediente_de_url(self, url: str) -> Optional[str]:
-        """Extrae el código de expediente de una URL"""
-        if not url:
-            return None
-        
-        # Patrones comunes para extraer código de expediente
-        patrones = [
-            r'/expediente/([^/?#]+)',
-            r'/procedimiento/([^/?#]+)', 
-            r'expediente=([^&/#]+)',
-            r'codigo=([^&/#]+)',
-            r'id=([^&/#]+)'
-        ]
-        
-        for patron in patrones:
-            match = re.search(patron, url)
-            if match:
-                return match.group(1)
-        
-        return None
-    
-    async def extraer_informacion_detalle(self, page) -> Dict:
-        """Extrae información estructurada de la página de detalle"""
+    async def extraer_informacion_detalle_comprasmx(self, page) -> Dict:
+        """
+        NUEVA FUNCIÓN: Extrae información estructurada específica de ComprasMX
+        Basada en la estructura HTML real analizada
+        """
         try:
             informacion = {
-                "descripcion_completa": "",
-                "documentos_adjuntos": [],
-                "fechas_detalladas": {},
-                "ubicacion_especifica": "",
-                "contacto": {},
-                "montos_detallados": {},
-                "requisitos": [],
-                "cronograma": []
+                "codigo_expediente": "",
+                "numero_procedimiento": "",
+                "estatus": "",
+                "dependencia_entidad": "",
+                "unidad_compradora": "",
+                "responsable_captura": "",
+                "email_unidad_compradora": "",
+                "descripcion_detallada": "",
+                "tipo_procedimiento": "",
+                "entidad_federativa": "",
+                "año_ejercicio": "",
+                "fechas_cronograma": {},
+                "partidas_especificas": [],
+                "datos_especificos": {},
+                "documentos_anexos": [],
+                "requisitos_economicos": []
             }
             
-            # Extraer descripción completa
+            print("    🔍 Extrayendo información detallada...")
+            
+            # Obtener todo el contenido HTML
+            contenido = await page.content()
+            
+            # CÓDIGO DEL EXPEDIENTE
             try:
-                desc_selectores = [
-                    ".descripcion", ".description", 
-                    ".detalle", ".detail",
-                    ".contenido", ".content",
-                    "p:has-text('Descripción')",
-                    ".procedimiento-descripcion"
+                codigo_patterns = [
+                    r'Código del expediente:\s*([^\n]+)',
+                    r'E-\d{4}-\d{8}'
                 ]
                 
-                for selector in desc_selectores:
-                    elemento = page.locator(selector).first
-                    if await elemento.is_visible():
-                        texto = await elemento.text_content()
-                        if texto and len(texto.strip()) > 50:
-                            informacion["descripcion_completa"] = texto.strip()
+                for pattern in codigo_patterns:
+                    match = re.search(pattern, contenido)
+                    if match:
+                        informacion["codigo_expediente"] = match.group(1).strip()
+                        break
+            except:
+                pass
+            
+            # NÚMERO DE PROCEDIMIENTO
+            try:
+                numero_patterns = [
+                    r'Número de procedimiento de contratación:\s*([^\n]+)',
+                    r'[A-Z]{2}-\d{2}-[A-Z0-9]{3}-\d{9}-[A-Z]-\d+-\d{4}'
+                ]
+                
+                for pattern in numero_patterns:
+                    match = re.search(pattern, contenido)
+                    if match:
+                        informacion["numero_procedimiento"] = match.group(1).strip()
+                        break
+            except:
+                pass
+            
+            # ESTATUS
+            try:
+                estatus_patterns = [
+                    r'Estatus del procedimiento de contratación:\s*([^\n]+)',
+                    r'(VIGENTE|CERRADO|CANCELADO|DESIERTO)'
+                ]
+                
+                for pattern in estatus_patterns:
+                    match = re.search(pattern, contenido)
+                    if match:
+                        estatus = match.group(1).strip()
+                        if estatus in ['VIGENTE', 'CERRADO', 'CANCELADO', 'DESIERTO']:
+                            informacion["estatus"] = estatus
                             break
             except:
                 pass
             
-            # Extraer documentos adjuntos
+            # DEPENDENCIA O ENTIDAD
             try:
-                doc_selectores = [
-                    "a[href*='.pdf']",
-                    "a[href*='.doc']", 
-                    "a[href*='.xlsx']",
-                    ".documentos a",
-                    ".adjuntos a",
-                    ".archivos a"
+                dep_pattern = r'Dependencia o Entidad:\s*([^\n]+)'
+                match = re.search(dep_pattern, contenido)
+                if match:
+                    informacion["dependencia_entidad"] = match.group(1).strip()
+            except:
+                pass
+            
+            # UNIDAD COMPRADORA
+            try:
+                unidad_pattern = r'Unidad compradora:\s*([^\n]+)'
+                match = re.search(unidad_pattern, contenido)
+                if match:
+                    informacion["unidad_compradora"] = match.group(1).strip()
+            except:
+                pass
+            
+            # RESPONSABLE DE LA CAPTURA
+            try:
+                resp_pattern = r'Responsable de la captura:\s*([^\n]+)'
+                match = re.search(resp_pattern, contenido)
+                if match:
+                    informacion["responsable_captura"] = match.group(1).strip()
+            except:
+                pass
+            
+            # EMAIL UNIDAD COMPRADORA
+            try:
+                email_pattern = r'Correo electrónico unidad compradora:\s*([^\n]+)'
+                match = re.search(email_pattern, contenido)
+                if match:
+                    informacion["email_unidad_compradora"] = match.group(1).strip()
+            except:
+                pass
+            
+            # DESCRIPCIÓN DETALLADA
+            try:
+                desc_pattern = r'Descripción detallada del procedimiento de contratación:\s*([^\n]+)'
+                match = re.search(desc_pattern, contenido)
+                if match:
+                    informacion["descripcion_detallada"] = match.group(1).strip()
+            except:
+                pass
+            
+            # TIPO DE PROCEDIMIENTO
+            try:
+                tipo_pattern = r'Tipo de procedimiento de contratación:\s*([^\n]+)'
+                match = re.search(tipo_pattern, contenido)
+                if match:
+                    informacion["tipo_procedimiento"] = match.group(1).strip()
+            except:
+                pass
+            
+            # ENTIDAD FEDERATIVA
+            try:
+                entidad_pattern = r'Entidad Federativa donde se llevará a cabo la contratación:\s*([^\n]+)'
+                match = re.search(entidad_pattern, contenido)
+                if match:
+                    informacion["entidad_federativa"] = match.group(1).strip()
+            except:
+                pass
+            
+            # AÑO DEL EJERCICIO
+            try:
+                año_pattern = r'Año del ejercicio presupuestal:\s*([^\n]+)'
+                match = re.search(año_pattern, contenido)
+                if match:
+                    informacion["año_ejercicio"] = match.group(1).strip()
+            except:
+                pass
+            
+            # FECHAS DEL CRONOGRAMA
+            try:
+                fechas_campos = [
+                    ("fecha_publicacion", r'Fecha y hora de publicación:\s*([^\n]+)'),
+                    ("fecha_apertura", r'Fecha y hora de presentación y apertura de proposiciones:\s*([^\n]+)'),
+                    ("fecha_junta_aclaraciones", r'Fecha y hora de junta de aclaraciones:\s*([^\n]+)'),
+                    ("fecha_fallo", r'Fecha y hora del acto del Fallo:\s*([^\n]+)'),
+                    ("fecha_inicio_estimada", r'Fecha estimada del inicio del contrato:\s*([^\n]+)'),
+                    ("lugar_apertura", r'Lugar de apertura de proposiciones:\s*([^\n]+)'),
+                    ("lugar_junta_aclaraciones", r'Lugar de la junta de aclaraciones:\s*([^\n]+)'),
+                    ("lugar_fallo", r'Lugar del acto del Fallo:\s*([^\n]+)')
                 ]
                 
-                for selector in doc_selectores:
-                    elementos = await page.locator(selector).all()
-                    for elemento in elementos:
-                        href = await elemento.get_attribute("href")
-                        texto = await elemento.text_content()
-                        if href:
-                            informacion["documentos_adjuntos"].append({
-                                "nombre": texto.strip() if texto else "Documento",
-                                "url": href
+                for clave, pattern in fechas_campos:
+                    match = re.search(pattern, contenido)
+                    if match:
+                        informacion["fechas_cronograma"][clave] = match.group(1).strip()
+            except:
+                pass
+            
+            # PARTIDAS ESPECÍFICAS
+            try:
+                # Buscar tabla de partidas específicas en el HTML
+                if 'Partidas específicas' in contenido:
+                    # Extraer partidas usando patrones
+                    partidas_matches = re.findall(r'(\d+)\s+([A-Z0-9\s]+)', contenido)
+                    for clave, desc in partidas_matches:
+                        if len(clave.strip()) == 5:  # Códigos de partida son de 5 dígitos
+                            informacion["partidas_especificas"].append({
+                                "clave": clave.strip(),
+                                "descripcion": desc.strip()
                             })
             except:
                 pass
             
-            # Extraer fechas detalladas
+            # DATOS ESPECÍFICOS
             try:
-                fecha_selectores = [
-                    ":has-text('Fecha')",
-                    ":has-text('fecha')",
-                    ".fecha", ".date",
-                    ".cronograma", ".timeline"
+                datos_campos = [
+                    ("tipo_contratacion", r'Tipo de contratación:\s*([^\n]+)'),
+                    ("criterio_evaluacion", r'Criterio de evaluación:\s*([^\n]+)'),
+                    ("caracter", r'Carácter:\s*([^\n]+)'),
+                    ("moneda", r'Moneda:\s*([^\n]+)'),
+                    ("anticipo", r'Anticipo:\s*([^\n]+)'),
+                    ("forma_pago", r'Forma de pago:\s*([^\n]+)'),
+                    ("garantia_cumplimiento", r'Garantía de cumplimiento:\s*([^\n]+)'),
+                    ("porcentaje_garantia", r'Porcentaje del monto del contrato a garantizar:\s*([^\n]+)'),
+                    ("participacion_conjunta", r'¿Permite participación conjunta\?\s*([^\n]+)'),
+                    ("contrato_abierto", r'Contrato Abierto:\s*([^\n]+)'),
+                    ("plurianual", r'Es plurianual:\s*([^\n]+)')
                 ]
                 
-                for selector in fecha_selectores:
-                    elementos = await page.locator(selector).all()
-                    for elemento in elementos:
-                        texto = await elemento.text_content()
-                        if texto and any(palabra in texto.lower() for palabra in ['fecha', 'plazo', 'vencimiento']):
-                            # Extraer fechas del texto
-                            fechas_encontradas = re.findall(r'\d{1,2}/\d{1,2}/\d{4}', texto)
-                            if fechas_encontradas:
-                                informacion["fechas_detalladas"][texto[:50]] = fechas_encontradas
+                for clave, pattern in datos_campos:
+                    match = re.search(pattern, contenido)
+                    if match:
+                        informacion["datos_especificos"][clave] = match.group(1).strip()
             except:
                 pass
             
-            # Extraer información de contacto
+            # DOCUMENTOS ANEXOS
             try:
-                contacto_selectores = [
-                    ":has-text('Contacto')",
-                    ":has-text('contacto')",
-                    ":has-text('Email')",
-                    ":has-text('Teléfono')",
-                    ".contacto", ".contact"
-                ]
-                
-                for selector in contacto_selectores:
-                    elementos = await page.locator(selector).all()
-                    for elemento in elementos:
-                        texto = await elemento.text_content()
-                        if texto:
-                            # Extraer emails
-                            emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', texto)
-                            if emails:
-                                informacion["contacto"]["emails"] = emails
-                            
-                            # Extraer teléfonos
-                            telefonos = re.findall(r'\b\d{2,3}[-.\s]?\d{3,4}[-.\s]?\d{4}\b', texto)
-                            if telefonos:
-                                informacion["contacto"]["telefonos"] = telefonos
+                if 'ANEXOS' in contenido:
+                    # Extraer información de documentos
+                    doc_patterns = [
+                        r'CONVOCATORIA\s+CONVOCATORIA',
+                        r'ANEXO TÉCNICO\s+ANEXO TÉCNICO', 
+                        r'MODELO DE CONTRATO\s+MODELO DE CONTRATO',
+                        r'ACTA JUNTA DE ACLARACIONES\s+ACTA JUNTA DE ACLARACIONES'
+                    ]
+                    
+                    for pattern in doc_patterns:
+                        if re.search(pattern, contenido):
+                            doc_tipo = pattern.split('\\s+')[0]
+                            informacion["documentos_anexos"].append({
+                                "tipo": doc_tipo,
+                                "descripcion": doc_tipo
+                            })
             except:
                 pass
             
+            # REQUISITOS ECONÓMICOS (tabla de partidas con montos)
+            try:
+                if 'REQUISITOS' in contenido and 'ECONÓMICOS' in contenido:
+                    # Buscar patrones de partidas con detalles económicos
+                    req_matches = re.findall(r'(\d{5})\s+([^\\n]+)\\s+(PIEZA|SERVICIO|LOTE)', contenido)
+                    for partida, desc, unidad in req_matches:
+                        informacion["requisitos_economicos"].append({
+                            "partida_especifica": partida,
+                            "descripcion": desc.strip(),
+                            "unidad_medida": unidad
+                        })
+            except:
+                pass
+            
+            campos_con_datos = len([k for k, v in informacion.items() if v])
+            print(f"    ✓ Extracción completada - {campos_con_datos} campos con datos")
             return informacion
             
         except Exception as e:
-            print(f"    ⚠️ Error extrayendo información detallada: {e}")
+            print(f"    ❌ Error en extracción de detalle: {e}")
             return {}
     
     async def guardar_detalle_individual(self, codigo_expediente: str, detalle: Dict):
@@ -558,7 +679,7 @@ class ComprasMXScraper:
         self.extraer_detalles = extraer_detalles
         
         print(f"\n{'='*60}")
-        print(f"SCRAPER COMPRASMX - CAPTURA COMPLETA")
+        print(f"SCRAPER COMPRASMX - CAPTURA COMPLETA + DETALLES CORREGIDOS")
         print(f"Hora: {datetime.now()}")
         print(f"Modo: {'Headless' if headless else 'Visible'}")
         print(f"Extraer detalles: {'Sí' if extraer_detalles else 'No'}")
