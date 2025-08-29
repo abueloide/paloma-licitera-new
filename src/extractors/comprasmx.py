@@ -3,6 +3,7 @@
 """
 Extractor de ComprasMX - Portal de Compras del Gobierno Federal
 Versión extendida con soporte para detalles individuales
+CORREGIDO: Bug de integración de detalles
 """
 
 import json
@@ -173,10 +174,26 @@ class ComprasMXExtractor(BaseExtractor):
             if not numero:
                 return None
             
-            # NUEVO: Buscar detalles individuales para este expediente
-            detalle_individual = self.detalles_cargados.get(numero)
-            if detalle_individual:
-                logger.debug(f"✓ Detalle individual encontrado para {numero}")
+            # CORREGIDO: Buscar detalles individuales usando AMBOS posibles códigos
+            detalle_individual = None
+            
+            # Intentar buscar por cod_expediente primero (formato nuevo)
+            if registro.get('cod_expediente'):
+                detalle_individual = self.detalles_cargados.get(registro['cod_expediente'])
+                if detalle_individual:
+                    logger.debug(f"✓ Detalle individual encontrado por cod_expediente: {registro['cod_expediente']}")
+            
+            # Si no se encontró, intentar por numero_procedimiento
+            if not detalle_individual and registro.get('numero_procedimiento'):
+                detalle_individual = self.detalles_cargados.get(registro['numero_procedimiento'])
+                if detalle_individual:
+                    logger.debug(f"✓ Detalle individual encontrado por numero_procedimiento: {registro['numero_procedimiento']}")
+            
+            # Si aún no se encontró, intentar por el numero final que usaremos
+            if not detalle_individual:
+                detalle_individual = self.detalles_cargados.get(numero)
+                if detalle_individual:
+                    logger.debug(f"✓ Detalle individual encontrado por numero final: {numero}")
             
             # Normalizar tipo de procedimiento
             tipo_proc_original = registro.get('tipo_procedimiento', '')
@@ -196,14 +213,14 @@ class ComprasMXExtractor(BaseExtractor):
             if not fecha_publicacion:
                 fecha_publicacion = datetime.now().date()
             
-            # NUEVO: Construir URL con hash si disponible en detalles
+            # CORREGIDO: Construir URL con hash si disponible en detalles
             uuid = registro.get('uuid_procedimiento', '')
             url_original = registro.get('url_original')
             
             # Priorizar URL con hash de los detalles individuales
             if detalle_individual and detalle_individual.get('url_completa_con_hash'):
                 url_original = detalle_individual['url_completa_con_hash']
-                logger.debug(f"URL con hash encontrada: {url_original}")
+                logger.debug(f"URL con hash aplicada: {url_original}")
             elif not url_original and uuid:
                 url_original = f"https://comprasmx.buengobierno.gob.mx/procedimiento/{uuid}"
             elif not url_original:
@@ -223,13 +240,13 @@ class ComprasMXExtractor(BaseExtractor):
                 except:
                     monto_estimado = None
             
-            # NUEVO: Enriquecer descripción con información detallada
+            # CORREGIDO: Enriquecer descripción con información detallada
             descripcion = registro.get('descripcion', '')
             if detalle_individual and detalle_individual.get('informacion_extraida', {}).get('descripcion_completa'):
                 desc_detallada = detalle_individual['informacion_extraida']['descripcion_completa']
                 if desc_detallada and len(desc_detallada) > len(descripcion or ''):
                     descripcion = desc_detallada
-                    logger.debug(f"Descripción enriquecida para {numero}")
+                    logger.debug(f"Descripción enriquecida para {numero} ({len(desc_detallada)} chars)")
             
             # Crear licitación normalizada
             licitacion = self.normalizar_licitacion(registro)
@@ -253,14 +270,17 @@ class ComprasMXExtractor(BaseExtractor):
                 'uuid_procedimiento': uuid
             })
             
-            # NUEVO: Agregar detalles individuales a datos_especificos
+            # CORREGIDO: Agregar detalles individuales a datos_especificos
             if detalle_individual:
                 licitacion = self._integrar_detalle_individual(licitacion, registro, detalle_individual)
+                logger.debug(f"✓ Detalle individual integrado exitosamente para {numero}")
+            else:
+                logger.debug(f"⚠️ No se encontró detalle individual para {numero}")
             
             return licitacion
             
         except Exception as e:
-            logger.debug(f"Error parseando registro: {e}")
+            logger.error(f"Error parseando registro: {e}")
             return None
     
     def _integrar_detalle_individual(self, licitacion: Dict, registro: Dict, detalle: Dict) -> Dict:
