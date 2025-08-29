@@ -4,6 +4,7 @@
 Extractor DOF mejorado con Claude Haiku 3.5
 ============================================
 Procesa archivos TXT del DOF usando IA para extraer TODAS las licitaciones
+Con chunking por página completa para preservar contexto
 """
 
 import os
@@ -32,7 +33,7 @@ except ImportError:
     exit(1)
 
 class DOFExtractorAI:
-    """Extractor mejorado del DOF usando Claude Haiku"""
+    """Extractor mejorado del DOF usando Claude Haiku con chunking por página completa"""
     
     def __init__(self):
         # Configurar API key desde .env
@@ -124,6 +125,7 @@ class DOFExtractorAI:
     def extraer_seccion_relevante(self, contenido: str) -> str:
         """
         Extrae solo la sección que contiene las convocatorias
+        PRESERVANDO marcadores de página
         """
         inicio, fin = self.encontrar_seccion_convocatorias(contenido)
         
@@ -132,17 +134,23 @@ class DOFExtractorAI:
                 # Si son índices de caracteres
                 if inicio < 1000 and fin < 1000:
                     # Probablemente son números de página, buscar en el contenido
-                    patron_pagina = re.compile(rf"PÁGINA\s+{inicio}")
+                    patron_pagina = re.compile(rf"===\s*PÁGINA\s+{inicio}\s*===")
                     match_inicio = patron_pagina.search(contenido)
                     if match_inicio:
                         inicio = match_inicio.start()
                     
-                    patron_fin = re.compile(rf"PÁGINA\s+{fin}")
+                    patron_fin = re.compile(rf"===\s*PÁGINA\s+{fin}\s*===")
                     match_fin = patron_fin.search(contenido)
                     if match_fin:
                         fin = match_fin.start()
                 
-                return contenido[inicio:fin]
+                seccion = contenido[inicio:fin]
+                
+                # CRÍTICO: Verificar que los marcadores de página estén preservados
+                if not re.search(r'===\s*PÁGINA\s+\d+\s*===', seccion, re.IGNORECASE):
+                    logger.warning("No se encontraron marcadores de página en la sección extraída")
+                
+                return seccion
         
         # Si no pudimos encontrar la sección, buscar patrones directamente
         inicio_idx = contenido.find("CONVOCATORIAS PARA CONCURSOS")
@@ -155,25 +163,75 @@ class DOFExtractorAI:
         if fin_idx < 0:
             fin_idx = len(contenido)
         
-        return contenido[inicio_idx:fin_idx]
+        seccion = contenido[inicio_idx:fin_idx]
+        
+        # CRÍTICO: Verificar que los marcadores de página estén preservados
+        if not re.search(r'===\s*PÁGINA\s+\d+\s*===', seccion, re.IGNORECASE):
+            logger.warning("No se encontraron marcadores de página en la sección extraída")
+        
+        return seccion
     
-    def procesar_con_ia(self, texto: str, num_chunk: int = 1) -> List[Dict]:
+    def dividir_por_paginas_completas(self, texto: str) -> List[Dict]:
         """
-        Procesa un fragmento de texto con Claude Haiku para extraer TODAS las licitaciones
+        Divide el texto en chunks por página completa del DOF
+        Retorna información de página + contenido
         """
-        prompt = f"""Analiza este fragmento del Diario Oficial de la Federación y extrae TODAS las licitaciones que encuentres.
+        
+        # Buscar marcadores de página: "=== PÁGINA 123 ==="
+        patron_pagina = re.compile(r'===\s*PÁGINA\s+(\d+)\s*===', re.IGNORECASE)
+        marcadores = list(patron_pagina.finditer(texto))
+        
+        if not marcadores:
+            logger.warning("No se encontraron marcadores de página === PÁGINA XXX ===")
+            return []
+        
+        chunks_por_pagina = []
+        
+        for i, marcador in enumerate(marcadores):
+            numero_pagina = int(marcador.group(1))
+            inicio_pagina = marcador.start()
+            
+            # Determinar fin de página (inicio de siguiente o final del texto)
+            if i + 1 < len(marcadores):
+                fin_pagina = marcadores[i + 1].start()
+            else:
+                fin_pagina = len(texto)
+            
+            contenido_pagina = texto[inicio_pagina:fin_pagina].strip()
+            
+            # Solo incluir páginas con contenido sustancial
+            if len(contenido_pagina) > 500:
+                chunks_por_pagina.append({
+                    'numero_pagina': numero_pagina,
+                    'contenido': contenido_pagina,
+                    'caracteres': len(contenido_pagina)
+                })
+        
+        logger.info(f"Encontradas {len(chunks_por_pagina)} páginas con contenido sustancial")
+        return chunks_por_pagina
+    
+    def procesar_pagina_con_ia(self, info_pagina: Dict, num_chunk: int = 1) -> List[Dict]:
+        """
+        Procesa UNA página completa con Claude
+        """
+        numero_pagina = info_pagina['numero_pagina']
+        contenido = info_pagina['contenido']
+        
+        prompt = f"""Analiza esta PÁGINA COMPLETA #{numero_pagina} del Diario Oficial de la Federación.
 
-TEXTO A ANALIZAR:
-{texto[:8000]}  # Claude puede manejar hasta ~100k tokens
+PÁGINA {numero_pagina} - CONTENIDO COMPLETO:
+{contenido}
 
-INSTRUCCIONES CRÍTICAS:
-1. Extrae CADA licitación como un objeto JSON separado
-2. Busca patrones como:
-   - "LICITACIÓN PÚBLICA NACIONAL"
-   - "INVITACIÓN A CUANDO MENOS TRES"
-   - "RESUMEN DE CONVOCATORIA"
-   - Referencias como "(R.- XXXXX)"
-3. Para cada licitación, extrae TODOS estos campos:
+INSTRUCCIONES ESPECÍFICAS:
+1. Esta es una página COMPLETA - puede contener 1 o 2 licitaciones completas
+2. NUNCA habrá licitaciones cortadas - están completas en esta página
+3. Extrae TODAS las licitaciones que encuentres en esta página específica
+4. Busca patrones: "LICITACIÓN PÚBLICA", "INVITACIÓN A CUANDO MENOS", "RESUMEN DE CONVOCATORIA"
+
+CONTEXTO DE PÁGINA:
+- Número de página: {numero_pagina}
+- Caracteres: {info_pagina['caracteres']}
+- Licitaciones esperadas: 1-2 por página
 
 FORMATO JSON REQUERIDO para cada licitación:
 {{
@@ -196,7 +254,7 @@ FORMATO JSON REQUERIDO para cada licitación:
 }}
 
 REGLAS:
-- Extrae TODAS las licitaciones que encuentres
+- Extrae TODAS las licitaciones que encuentres en esta página
 - Si un campo no existe, usa null
 - Las fechas deben ser del año 2025
 - El numero_procedimiento es CRÍTICO - sin él no se puede guardar
@@ -233,20 +291,20 @@ NO incluyas texto adicional, solo el JSON."""
             if not isinstance(licitaciones, list):
                 licitaciones = [licitaciones]
             
-            self.logger.info(f"  Chunk {num_chunk}: {len(licitaciones)} licitaciones encontradas")
+            self.logger.info(f"  Página {numero_pagina}: {len(licitaciones)} licitaciones encontradas")
             return licitaciones
             
         except json.JSONDecodeError as e:
-            self.logger.error(f"Error parseando JSON en chunk {num_chunk}: {e}")
+            self.logger.error(f"Error parseando JSON en página {numero_pagina}: {e}")
             self.logger.debug(f"Respuesta: {respuesta_texto[:500]}...")
             return []
         except Exception as e:
-            self.logger.error(f"Error con API en chunk {num_chunk}: {e}")
+            self.logger.error(f"Error con API en página {numero_pagina}: {e}")
             return []
     
     def procesar_archivo(self, archivo_txt: Path) -> List[Dict]:
         """
-        Procesa un archivo completo del DOF
+        Procesa un archivo completo del DOF con chunking por páginas completas
         """
         self.logger.info(f"Procesando: {archivo_txt.name}")
         
@@ -266,46 +324,35 @@ NO incluyas texto adicional, solo el JSON."""
         
         self.logger.info(f"  Sección de convocatorias: {len(seccion_convocatorias)} caracteres")
         
-        # Dividir en chunks si es muy grande (Claude maneja ~100k tokens, ~400k caracteres)
-        max_chunk_size = 30000  # ~7500 tokens, dejando espacio para el prompt
-        chunks = []
+        # CAMBIO: Usar chunking por páginas completas
+        chunks_por_pagina = self.dividir_por_paginas_completas(seccion_convocatorias)
         
-        if len(seccion_convocatorias) > max_chunk_size:
-            # Dividir inteligentemente por referencias o párrafos
-            partes = re.split(r'\(R\.\-\s*\d+\)', seccion_convocatorias)
-            
-            chunk_actual = ""
-            for parte in partes:
-                if len(chunk_actual) + len(parte) < max_chunk_size:
-                    chunk_actual += parte
-                else:
-                    if chunk_actual:
-                        chunks.append(chunk_actual)
-                    chunk_actual = parte
-            
-            if chunk_actual:
-                chunks.append(chunk_actual)
-        else:
-            chunks = [seccion_convocatorias]
+        if not chunks_por_pagina:
+            self.logger.warning("No se pudieron dividir por páginas completas")
+            return []
         
-        self.logger.info(f"  Dividido en {len(chunks)} chunks para procesar")
+        self.logger.info(f"  Dividido en {len(chunks_por_pagina)} páginas para procesar")
         
-        # Procesar cada chunk
+        # Procesar cada página completa
         todas_licitaciones = []
-        for i, chunk in enumerate(chunks, 1):
-            licitaciones = self.procesar_con_ia(chunk, i)
+        for chunk_info in chunks_por_pagina:
+            self.logger.info(f"  Procesando página {chunk_info['numero_pagina']}...")
             
-            # Añadir metadatos
+            licitaciones = self.procesar_pagina_con_ia(chunk_info)
+            
+            # Agregar metadatos incluyendo número de página
             for lic in licitaciones:
                 lic['fuente'] = 'DOF'
                 lic['estado'] = 'PUBLICADA'
                 lic['moneda'] = 'MXN'
+                lic['numero_pagina_dof'] = chunk_info['numero_pagina']  # NUEVO: Trazabilidad
                 lic['datos_originales'] = {
                     'archivo_origen': archivo_txt.name,
                     'fecha_procesamiento': datetime.now().isoformat(),
                     'procesado_con_ia': True,
                     'modelo': 'claude-3-5-haiku-20241022',
-                    'chunk': f"{i}/{len(chunks)}"
+                    'pagina_dof': chunk_info['numero_pagina'],
+                    'caracteres_pagina': chunk_info['caracteres']
                 }
             
             todas_licitaciones.extend(licitaciones)
@@ -325,7 +372,7 @@ NO incluyas texto adicional, solo el JSON."""
         """
         Método principal - extrae todas las licitaciones DOF
         """
-        self.logger.info("=== Iniciando extracción DOF con IA ===")
+        self.logger.info("=== Iniciando extracción DOF con IA (chunking por páginas) ===")
         
         # Verificar que exista el directorio
         if not self.raw_dir.exists():
@@ -356,7 +403,7 @@ NO incluyas texto adicional, solo el JSON."""
             'archivos_procesados': 0,
             'archivos_con_licitaciones': 0,
             'total_licitaciones': 0,
-            'licitaciones_sin_numero': 0
+            'total_paginas_procesadas': 0
         }
         
         # Procesar cada archivo
@@ -368,15 +415,24 @@ NO incluyas texto adicional, solo el JSON."""
                 estadisticas['archivos_con_licitaciones'] += 1
                 estadisticas['total_licitaciones'] += len(licitaciones)
                 
+                # Contar páginas procesadas
+                paginas_unicas = set()
+                for lic in licitaciones:
+                    if 'numero_pagina_dof' in lic:
+                        paginas_unicas.add(lic['numero_pagina_dof'])
+                estadisticas['total_paginas_procesadas'] += len(paginas_unicas)
+                
                 # Guardar resultado individual
-                archivo_salida = self.processed_dir / archivo.name.replace('.txt', '_ai.json')
+                archivo_salida = self.processed_dir / archivo.name.replace('.txt', '_ai_paginas.json')
                 with open(archivo_salida, 'w', encoding='utf-8') as f:
                     json.dump({
                         'fecha_procesamiento': datetime.now().isoformat(),
                         'archivo_origen': archivo.name,
                         'total_licitaciones': len(licitaciones),
+                        'paginas_procesadas': len(paginas_unicas),
                         'procesado_con_ia': True,
                         'modelo': 'claude-3-5-haiku-20241022',
+                        'chunking_method': 'paginas_completas',
                         'licitaciones': licitaciones
                     }, f, ensure_ascii=False, indent=2)
                 
@@ -388,16 +444,19 @@ NO incluyas texto adicional, solo el JSON."""
         self.logger.info("📊 ESTADÍSTICAS FINALES:")
         self.logger.info(f"  • Archivos procesados: {estadisticas['archivos_procesados']}")
         self.logger.info(f"  • Archivos con licitaciones: {estadisticas['archivos_con_licitaciones']}")
+        self.logger.info(f"  • Total páginas procesadas: {estadisticas['total_paginas_procesadas']}")
         self.logger.info(f"  • Total licitaciones extraídas: {estadisticas['total_licitaciones']}")
         
         # Guardar resumen consolidado
         if todas_licitaciones:
-            resumen_archivo = self.processed_dir / f"dof_consolidado_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            resumen_archivo = self.processed_dir / f"dof_consolidado_paginas_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
             with open(resumen_archivo, 'w', encoding='utf-8') as f:
                 json.dump({
                     'fecha_procesamiento': datetime.now().isoformat(),
                     'estadisticas': estadisticas,
                     'total_licitaciones': len(todas_licitaciones),
+                    'chunking_method': 'paginas_completas',
+                    'mejora_implementada': 'chunking_por_pagina_completa',
                     'licitaciones': todas_licitaciones
                 }, f, ensure_ascii=False, indent=2)
             self.logger.info(f"📁 Resumen guardado en: {resumen_archivo.name}")
@@ -407,7 +466,7 @@ NO incluyas texto adicional, solo el JSON."""
 
 def main():
     """Función principal para pruebas"""
-    print("\n🚀 Iniciando extractor DOF con IA...")
+    print("\n🚀 Iniciando extractor DOF con IA (chunking por páginas)...")
     print("="*50)
     
     # Verificar API key
@@ -431,6 +490,7 @@ def main():
                 print(f"  • Título: {titulo[:80]}...")
             print(f"  • Entidad: {lic.get('entidad_compradora', 'N/A')}")
             print(f"  • Fecha apertura: {lic.get('fecha_apertura', 'N/A')}")
+            print(f"  • Página DOF: {lic.get('numero_pagina_dof', 'N/A')}")
             
     except Exception as e:
         print(f"\n❌ Error: {e}")
