@@ -134,12 +134,12 @@ class DOFExtractorAI:
                 # Si son índices de caracteres
                 if inicio < 1000 and fin < 1000:
                     # Probablemente son números de página, buscar en el contenido
-                    patron_pagina = re.compile(rf"===\s*PÁGINA\s+{inicio}\s*===")
+                    patron_pagina = re.compile(rf"=====\s*\[PÁGINA\s+{inicio}\]\s*=====")
                     match_inicio = patron_pagina.search(contenido)
                     if match_inicio:
                         inicio = match_inicio.start()
                     
-                    patron_fin = re.compile(rf"===\s*PÁGINA\s+{fin}\s*===")
+                    patron_fin = re.compile(rf"=====\s*\[PÁGINA\s+{fin}\]\s*=====")
                     match_fin = patron_fin.search(contenido)
                     if match_fin:
                         fin = match_fin.start()
@@ -147,7 +147,7 @@ class DOFExtractorAI:
                 seccion = contenido[inicio:fin]
                 
                 # CRÍTICO: Verificar que los marcadores de página estén preservados
-                if not re.search(r'===\s*PÁGINA\s+\d+\s*===', seccion, re.IGNORECASE):
+                if not re.search(r'=====\s*\[PÁGINA\s+\d+\]\s*=====', seccion, re.IGNORECASE):
                     logger.warning("No se encontraron marcadores de página en la sección extraída")
                 
                 return seccion
@@ -166,7 +166,7 @@ class DOFExtractorAI:
         seccion = contenido[inicio_idx:fin_idx]
         
         # CRÍTICO: Verificar que los marcadores de página estén preservados
-        if not re.search(r'===\s*PÁGINA\s+\d+\s*===', seccion, re.IGNORECASE):
+        if not re.search(r'=====\s*\[PÁGINA\s+\d+\]\s*=====', seccion, re.IGNORECASE):
             logger.warning("No se encontraron marcadores de página en la sección extraída")
         
         return seccion
@@ -177,12 +177,12 @@ class DOFExtractorAI:
         Retorna información de página + contenido
         """
         
-        # Buscar marcadores de página: "=== PÁGINA 123 ==="
-        patron_pagina = re.compile(r'===\s*PÁGINA\s+(\d+)\s*===', re.IGNORECASE)
+        # CORREGIDO: Buscar marcadores de página: "===== [PÁGINA 123] ====="
+        patron_pagina = re.compile(r'=====\s*\[PÁGINA\s+(\d+)\]\s*=====', re.IGNORECASE)
         marcadores = list(patron_pagina.finditer(texto))
         
         if not marcadores:
-            logger.warning("No se encontraron marcadores de página === PÁGINA XXX ===")
+            logger.warning("No se encontraron marcadores de página ===== [PÁGINA XXX] =====")
             return []
         
         chunks_por_pagina = []
