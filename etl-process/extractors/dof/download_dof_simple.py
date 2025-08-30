@@ -76,10 +76,23 @@ def download_dof_simple():
                         f.write(response.content)
                     logger.info(f"✓ Descargado: {pdf_path.name}")
                     
-                    # Convertir a TXT
+                    # Convertir a TXT con manejo dinámico de PyMuPDF
                     try:
-                        # Intentar con PyMuPDF
-                        import fitz
+                        # Intentar importar PyMuPDF
+                        try:
+                            import fitz
+                        except ImportError:
+                            logger.info("PyMuPDF no encontrado, intentando instalación automática...")
+                            import subprocess
+                            import sys
+                            try:
+                                subprocess.check_call([sys.executable, "-m", "pip", "install", "PyMuPDF==1.23.14"])
+                                import fitz  # Importar después de la instalación
+                                logger.info("✅ PyMuPDF instalado exitosamente")
+                            except Exception as install_error:
+                                logger.warning(f"No se pudo instalar PyMuPDF automáticamente: {install_error}")
+                                raise ImportError("PyMuPDF no disponible")
+                        
                         doc = fitz.open(pdf_path)
                         text = ""
                         for page in doc:

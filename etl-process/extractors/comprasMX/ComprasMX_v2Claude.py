@@ -128,55 +128,56 @@ class ComprasMXScraper:
             print(f"[ERROR] No se pudo procesar {url}: {e}")
     
     async def procesar_licitaciones_en_pagina_actual(self, page):
-        """CORREGIDO: Procesa cada licitación individual capturando hash real y descripción completa"""
+        """CORREGIDO: Procesa cada licitación individual usando selectores PrimeNG específicos"""
         if not self.extraer_detalles:
             return
             
         print(f"\n=== EXTRAYENDO DETALLES CON HASH REAL - PÁGINA {self.pagina_actual} ===")
         
         try:
-            # Esperar a que la tabla se cargue
-            await page.wait_for_selector("table", timeout=15000)
+            # NUEVO: Esperar tabla PrimeNG específica
+            await page.wait_for_selector("table.p-datatable-table", timeout=15000)
+            print(f"  ✅ Tabla PrimeNG detectada")
             
-            # Obtener todas las filas de la tabla (excluyendo header)
-            filas_tabla = await page.locator("table tbody tr, table tr:not(:first-child)").all()
+            # NUEVO: Obtener filas usando selectores PrimeNG específicos
+            filas_tabla = await page.query_selector_all("table.p-datatable-table tbody tr")
             
             if not filas_tabla:
-                # Fallback: buscar filas con contenido relevante
-                filas_tabla = await page.locator("tr").all()
-                filas_filtradas = []
-                for fila in filas_tabla:
-                    texto = await fila.text_content()
-                    # Filtrar headers y filas vacías
-                    if texto and not ("Núm." in texto and "Número de identificación" in texto) and len(texto.strip()) > 20:
-                        filas_filtradas.append(fila)
-                filas_tabla = filas_filtradas
+                print(f"  ❌ No se encontraron filas en la tabla PrimeNG")
+                return
             
             print(f"  └─ Encontradas {len(filas_tabla)} filas de licitaciones")
             
         except Exception as e:
-            print(f"  ❌ Error localizando tabla: {e}")
+            print(f"  ❌ Error localizando tabla PrimeNG: {e}")
             return
         
-        # Procesar cada fila individual
+        # Procesar cada fila individual - UNA POR UNA COMPLETAMENTE
         for i, fila in enumerate(filas_tabla, 1):
             try:
-                # Extraer información básica de la fila
-                celdas = await fila.locator("td").all()
-                if len(celdas) < 3:
+                # NUEVO: Extraer información usando selectores específicos de columna
+                segunda_columna = await fila.query_selector("td:nth-child(2)")
+                tercera_columna = await fila.query_selector("td:nth-child(3)")
+                cuarta_columna = await fila.query_selector("td:nth-child(4)")
+                
+                if not segunda_columna:
                     continue
                 
-                # Extraer código de expediente (segunda columna)
-                codigo_expediente = (await celdas[1].text_content()).strip()
+                # Extraer código de expediente de la segunda columna
+                codigo_expediente = await segunda_columna.inner_text()
+                codigo_expediente = codigo_expediente.strip()
+                
                 if not codigo_expediente or len(codigo_expediente) < 5:
                     continue
                 
-                # Extraer título preliminar (tercera o cuarta columna)
+                # Extraer título de la tercera o cuarta columna
                 titulo_preliminar = ""
-                if len(celdas) >= 4:
-                    titulo_preliminar = (await celdas[3].text_content()).strip()
-                elif len(celdas) >= 3:
-                    titulo_preliminar = (await celdas[2].text_content()).strip()
+                if cuarta_columna:
+                    titulo_preliminar = await cuarta_columna.inner_text()
+                elif tercera_columna:
+                    titulo_preliminar = await tercera_columna.inner_text()
+                
+                titulo_preliminar = titulo_preliminar.strip()
                 
                 print(f"\n[{i}/{len(filas_tabla)}] Procesando: {codigo_expediente}")
                 print(f"    └─ {titulo_preliminar[:60]}...")
@@ -186,68 +187,152 @@ class ComprasMXScraper:
                     print(f"    ✓ Ya procesado: {codigo_expediente}")
                     continue
                 
-                # PASO CLAVE: Hacer click y navegar al detalle
-                await fila.click()
-                await page.wait_for_load_state("networkidle")
-                await page.wait_for_timeout(5000)  # Tiempo extra para carga completa
+                # NUEVO: Click específico en la segunda columna donde está el código
+                print(f"    🔄 Haciendo click en código de expediente...")
                 
-                # CAPTURAR HASH REAL DE LA URL usando window.location.href
-                url_completa_real = await page.evaluate("window.location.href")
-                print(f"    🌐 URL completa capturada: {url_completa_real}")
+                # Buscar enlace específico dentro de la segunda columna
+                enlace_codigo = await segunda_columna.query_selector("a, span[role='button'], div[role='button']")
                 
-                # Extraer hash UUID de la URL
-                hash_uuid = self.extraer_hash_de_url(url_completa_real)
-                if hash_uuid:
-                    print(f"    🔑 Hash UUID extraído: {hash_uuid}")
+                if not enlace_codigo:
+                    # Si no hay enlace específico, hacer click en la celda completa
+                    enlace_codigo = segunda_columna
+                    print(f"    ⚠️ No se encontró enlace específico, usando celda completa")
                 else:
-                    print(f"    ⚠️ No se pudo extraer hash UUID de la URL")
+                    print(f"    ✓ Encontrado enlace en código de expediente")
                 
-                # EXTRAER DESCRIPCIÓN DETALLADA COMPLETA
-                descripcion_completa = await self.extraer_descripcion_completa(page)
-                print(f"    📝 Descripción extraída: {len(descripcion_completa)} caracteres")
+                # Ejecutar click en el código de expediente
+                click_exitoso = False
+                try:
+                    # Hacer click con JavaScript (más confiable para PrimeNG)
+                    await enlace_codigo.click()
+                    print(f"    🔄 Click ejecutado, esperando navegación...")
+                    click_exitoso = True
+                except Exception as e:
+                    print(f"    ❌ Error en click directo: {e}")
+                    
+                    # Método alternativo: usar JavaScript
+                    try:
+                        await page.evaluate("(element) => element.click()", enlace_codigo)
+                        print(f"    🔄 Click por JavaScript ejecutado")
+                        click_exitoso = True
+                    except:
+                        print(f"    ❌ Todos los métodos de click fallaron")
                 
-                # Extraer información estructurada completa
-                informacion_extraida = await self.extraer_informacion_detalle_comprasmx(page)
+                if not click_exitoso:
+                    # Si no se pudo hacer click, guardar información básica y continuar
+                    print(f"    ⚠️ No se pudo hacer click - guardando información básica")
+                    detalle = {
+                        "codigo_expediente": codigo_expediente,
+                        "url_completa_con_hash": "https://comprasmx.buengobierno.gob.mx/sitiopublico/#/",
+                        "hash_uuid_real": None,
+                        "descripcion_completa": "",
+                        "informacion_extraida": {"titulo": titulo_preliminar},
+                        "timestamp_procesamiento": datetime.now().isoformat(),
+                        "procesado_exitosamente": False,
+                        "pagina_origen": self.pagina_actual,
+                        "error": "No se pudo hacer click en la licitación"
+                    }
+                    await self.guardar_detalle_individual(codigo_expediente, detalle)
+                    self.detalles_extraidos[codigo_expediente] = detalle
+                    continue
                 
-                # INTEGRAR HASH REAL EN LA INFORMACIÓN
-                if hash_uuid:
-                    informacion_extraida["hash_uuid_real"] = hash_uuid
+                print(f"    ⏳ Esperando navegación...")
                 
-                if descripcion_completa:
-                    informacion_extraida["descripcion_completa"] = descripcion_completa
+                # 2. ESPERAR QUE CAMBIE LA URL (máximo 15 segundos)
+                url_cambio = False
+                try:
+                    await page.wait_for_function(
+                        "window.location.href.includes('/detalle/') && window.location.href.includes('/procedimiento')",
+                        timeout=15000
+                    )
+                    url_cambio = True
+                    print(f"    ✅ URL cambió a página de detalle")
+                except:
+                    print(f"    ❌ URL NO CAMBIÓ - El click no navegó correctamente")
                 
-                # Crear objeto de detalle con datos reales
-                detalle = {
-                    "codigo_expediente": codigo_expediente,
-                    "url_completa_con_hash": url_completa_real,
-                    "hash_uuid_real": hash_uuid,  # NUEVO: Hash real extraído
-                    "descripcion_completa": descripcion_completa,  # NUEVO: Descripción completa
-                    "informacion_extraida": informacion_extraida,
-                    "timestamp_procesamiento": datetime.now().isoformat(),
-                    "procesado_exitosamente": True,
-                    "pagina_origen": self.pagina_actual
-                }
-                
-                # Guardar detalle individual
-                await self.guardar_detalle_individual(codigo_expediente, detalle)
-                self.detalles_extraidos[codigo_expediente] = detalle
-                
-                print(f"    ✅ Detalle completo guardado: {codigo_expediente}")
-                
-                # Volver al listado
-                await page.go_back()
-                await page.wait_for_load_state("networkidle")
-                await page.wait_for_timeout(3000)
+                # 3. SI LA URL CAMBIÓ, PROCESAR; SI NO, SALTAR
+                if url_cambio:
+                    # CORREGIDO: Esperar carga completa del detalle con timeouts más largos
+                    print(f"    ⏳ Esperando carga completa de la página de detalle...")
+                    await page.wait_for_load_state("networkidle", timeout=20000)  # Aumentado a 20 segundos
+                    await page.wait_for_timeout(8000)  # Aumentado a 8 segundos para cargas dinámicas
+                    print(f"    ✅ Página de detalle completamente cargada")
+                    
+                    # CAPTURAR INFORMACIÓN CON TIEMPO SUFICIENTE
+                    url_completa_real = await page.evaluate("window.location.href")
+                    print(f"    🌐 URL capturada: {url_completa_real}")
+                    
+                    hash_uuid = self.extraer_hash_de_url(url_completa_real)
+                    if hash_uuid:
+                        print(f"    🔑 Hash UUID: {hash_uuid}")
+                    
+                    print(f"    📝 Extrayendo descripción completa...")
+                    descripcion_completa = await self.extraer_descripcion_completa(page)
+                    print(f"    📝 Descripción extraída: {len(descripcion_completa)} caracteres")
+                    
+                    print(f"    📋 Extrayendo información estructurada...")
+                    informacion_extraida = await self.extraer_informacion_detalle_comprasmx(page)
+                    
+                    if hash_uuid:
+                        informacion_extraida["hash_uuid_real"] = hash_uuid
+                    if descripcion_completa:
+                        informacion_extraida["descripcion_completa"] = descripcion_completa
+                    
+                    # Guardar detalle
+                    detalle = {
+                        "codigo_expediente": codigo_expediente,
+                        "url_completa_con_hash": url_completa_real,
+                        "hash_uuid_real": hash_uuid,
+                        "descripcion_completa": descripcion_completa,
+                        "informacion_extraida": informacion_extraida,
+                        "timestamp_procesamiento": datetime.now().isoformat(),
+                        "procesado_exitosamente": True,
+                        "pagina_origen": self.pagina_actual
+                    }
+                    
+                    await self.guardar_detalle_individual(codigo_expediente, detalle)
+                    self.detalles_extraidos[codigo_expediente] = detalle
+                    print(f"    ✅ Detalle completo guardado: {codigo_expediente}")
+                    
+                    # 4. VOLVER AL LISTADO CON TIEMPO SUFICIENTE
+                    print(f"    ⬅️ Volviendo al listado...")
+                    await page.go_back()
+                    await page.wait_for_load_state("networkidle", timeout=15000)  # Tiempo suficiente para volver
+                    await page.wait_for_timeout(3000)  # Pausa extra para estabilizar
+                    print(f"    ✅ De vuelta en el listado")
+                    
+                else:
+                    # El click no funcionó, crear detalle básico sin información adicional
+                    print(f"    ⚠️ No se pudo acceder al detalle - guardando información básica")
+                    detalle = {
+                        "codigo_expediente": codigo_expediente,
+                        "url_completa_con_hash": "https://comprasmx.buengobierno.gob.mx/sitiopublico/#/",
+                        "hash_uuid_real": None,
+                        "descripcion_completa": "",
+                        "informacion_extraida": {},
+                        "timestamp_procesamiento": datetime.now().isoformat(),
+                        "procesado_exitosamente": False,
+                        "pagina_origen": self.pagina_actual,
+                        "error": "No se pudo hacer click en la licitación"
+                    }
+                    
+                    await self.guardar_detalle_individual(codigo_expediente, detalle)
+                    self.detalles_extraidos[codigo_expediente] = detalle
                 
             except Exception as e:
                 print(f"    ❌ Error procesando licitación {i}: {e}")
                 
-                # Intentar recuperación volviendo al listado
+                # Recuperación: volver al listado si es posible
                 try:
-                    await page.go_back()
-                    await page.wait_for_timeout(3000)
+                    current_url = await page.evaluate("window.location.href")
+                    if "/detalle/" in current_url:
+                        print(f"    🔄 Intentando volver al listado...")
+                        await page.go_back()
+                        await page.wait_for_load_state("networkidle")
+                        await page.wait_for_timeout(2000)
                 except:
-                    # Si falla, navegar directamente al inicio
+                    # Si todo falla, navegar directamente al listado
+                    print(f"    🔄 Navegando directamente al listado...")
                     await page.goto(
                         "https://comprasmx.buengobierno.gob.mx/sitiopublico/#/",
                         wait_until="domcontentloaded"
@@ -256,179 +341,23 @@ class ComprasMXScraper:
                 
         print(f"\n✅ Página {self.pagina_actual} completada. Detalles extraídos: {len(self.detalles_extraidos)}")
     
-    def extraer_hash_de_url(self, url_completa: str) -> str:
-        """NUEVA FUNCIÓN: Extrae el hash UUID de la URL de ComprasMX"""
-        try:
-            # Patrón para URLs de ComprasMX con hash
-            # Ejemplo: https://comprasmx.buengobierno.gob.mx/sitiopublico/#/sitiopublico/detalle/4b30105081ee4ce5b44aea1bf6eac6dc/procedimiento
-            patron = r'\/detalle\/([a-f0-9]{32})\/procedimiento'
-            
-            match = re.search(patron, url_completa)
-            if match:
-                return match.group(1)
-            
-            # Patrón alternativo más general
-            patron_alt = r'\/([a-f0-9]{32})\/'
-            match_alt = re.search(patron_alt, url_completa)
-            if match_alt:
-                return match_alt.group(1)
-                
-            return None
-            
-        except Exception as e:
-            print(f"    ❌ Error extrayendo hash: {e}")
-            return None
-    
-    async def extraer_descripcion_completa(self, page) -> str:
-        """NUEVA FUNCIÓN: Extrae la descripción detallada completa de la página"""
-        try:
-            # Buscar específicamente el campo de descripción detallada
-            selectores_descripcion = [
-                # Selector específico para el campo de descripción detallada
-                "[contains(text(), 'Descripción detallada del procedimiento')]//following-sibling::*[1]",
-                # Selector por texto visible
-                "xpath=//text()[contains(., 'Descripción detallada')]/following::text()[1]",
-                # Selectores de respaldo
-                ".descripcion-detallada",
-                "[data-field='descripcion_detallada']",
-                ".detalle-descripcion"
-            ]
-            
-            # También buscar por patrones de texto en el HTML
-            contenido_html = await page.content()
-            
-            # Patrón para encontrar descripción detallada
-            patron_descripcion = r'Descripción detallada del procedimiento de contratación:\s*([^\n]+(?:\n[^\n]+)*?)(?:\nLey/Soporte|$)'
-            
-            match = re.search(patron_descripcion, contenido_html, re.MULTILINE | re.DOTALL)
-            if match:
-                descripcion = match.group(1).strip()
-                # Limpiar HTML tags si existen
-                descripcion = re.sub(r'<[^>]+>', '', descripcion)
-                # Limpiar espacios extra
-                descripcion = re.sub(r'\s+', ' ', descripcion).strip()
-                return descripcion
-            
-            # Método alternativo: buscar por selectores CSS
-            for selector in selectores_descripcion:
-                try:
-                    if not selector.startswith("xpath="):
-                        elemento = page.locator(selector).first
-                        if await elemento.is_visible():
-                            texto = await elemento.text_content()
-                            if texto and len(texto.strip()) > 20:
-                                return texto.strip()
-                except:
-                    continue
-            
-            return ""
-            
-        except Exception as e:
-            print(f"    ❌ Error extrayendo descripción completa: {e}")
-            return ""
-    
-    async def extraer_informacion_detalle_comprasmx(self, page) -> Dict:
-        """Extrae información estructurada específica de ComprasMX con hash real incluido"""
-        try:
-            informacion = {
-                "codigo_expediente": "",
-                "numero_procedimiento": "",
-                "estatus": "",
-                "dependencia_entidad": "",
-                "unidad_compradora": "",
-                "responsable_captura": "",
-                "email_unidad_compradora": "",
-                "descripcion_detallada": "",
-                "tipo_procedimiento": "",
-                "entidad_federativa": "",
-                "año_ejercicio": "",
-                "fechas_cronograma": {},
-                "partidas_especificas": [],
-                "datos_especificos": {},
-                "documentos_anexos": [],
-                "requisitos_economicos": []
-            }
-            
-            # Obtener todo el contenido HTML
-            contenido = await page.content()
-            
-            # Extraer campos usando patrones mejorados
-            campos_patrones = [
-                ("codigo_expediente", r'Código del expediente:\s*([^\n]+)'),
-                ("numero_procedimiento", r'Número de procedimiento de contratación:\s*([^\n]+)'),
-                ("estatus", r'Estatus del procedimiento de contratación:\s*([^\n]+)'),
-                ("dependencia_entidad", r'Dependencia o Entidad:\s*([^\n]+)'),
-                ("unidad_compradora", r'Unidad compradora:\s*([^\n]+)'),
-                ("responsable_captura", r'Responsable de la captura:\s*([^\n]+)'),
-                ("email_unidad_compradora", r'Correo electrónico unidad compradora:\s*([^\n]+)'),
-                ("descripcion_detallada", r'Descripción detallada del procedimiento de contratación:\s*([^\n]+(?:\n[^\n]+)*?)(?:\nLey|$)'),
-                ("tipo_procedimiento", r'Tipo de procedimiento de contratación:\s*([^\n]+)'),
-                ("entidad_federativa", r'Entidad Federativa donde se llevará a cabo la contratación:\s*([^\n]+)'),
-                ("año_ejercicio", r'Año del ejercicio presupuestal:\s*([^\n]+)')
-            ]
-            
-            for campo, patron in campos_patrones:
-                try:
-                    if campo == "descripcion_detallada":
-                        match = re.search(patron, contenido, re.MULTILINE | re.DOTALL)
-                    else:
-                        match = re.search(patron, contenido)
-                    
-                    if match:
-                        valor = match.group(1).strip()
-                        # Limpiar HTML tags
-                        valor = re.sub(r'<[^>]+>', '', valor)
-                        # Limpiar espacios extra
-                        valor = re.sub(r'\s+', ' ', valor).strip()
-                        informacion[campo] = valor
-                except:
-                    pass
-            
-            # FECHAS DEL CRONOGRAMA (formato estandarizado)
-            try:
-                fechas_campos = [
-                    ("fecha_publicacion", r'Fecha y hora de publicación:\s*([^\n]+)'),
-                    ("fecha_apertura", r'Fecha y hora de presentación y apertura de proposiciones:\s*([^\n]+)'),
-                    ("fecha_junta_aclaraciones", r'Fecha y hora de junta de aclaraciones:\s*([^\n]+)'),
-                    ("fecha_fallo", r'Fecha y hora del acto del Fallo:\s*([^\n]+)'),
-                    ("fecha_inicio_estimada", r'Fecha estimada del inicio del contrato:\s*([^\n]+)'),
-                    ("lugar_apertura", r'Lugar de apertura de proposiciones:\s*([^\n]+)'),
-                    ("lugar_junta_aclaraciones", r'Lugar de la junta de aclaraciones:\s*([^\n]+)'),
-                    ("lugar_fallo", r'Lugar del acto del Fallo:\s*([^\n]+)')
-                ]
-                
-                for clave, pattern in fechas_campos:
-                    match = re.search(pattern, contenido)
-                    if match:
-                        valor = match.group(1).strip()
-                        informacion["fechas_cronograma"][clave] = valor
-            except:
-                pass
-            
-            return informacion
-            
-        except Exception as e:
-            print(f"    ❌ Error en extracción de detalle: {e}")
-            return {}
-    
-    async def guardar_detalle_individual(self, codigo_expediente: str, detalle: Dict):
-        """Guarda el detalle individual con hash real en archivo JSON"""
-        try:
-            # Limpiar código de expediente para nombre de archivo
-            codigo_limpio = re.sub(r'[^\w\-_.]', '_', codigo_expediente)
-            archivo_detalle = self.carpeta_detalles / f"detalle_{codigo_limpio}.json"
-            
-            with open(archivo_detalle, "w", encoding="utf-8") as f:
-                json.dump(detalle, f, ensure_ascii=False, indent=2)
-                
-            print(f"    💾 Detalle guardado: {archivo_detalle.name}")
-                
-        except Exception as e:
-            print(f"    ❌ Error guardando detalle {codigo_expediente}: {e}")
-    
     async def navegar_todas_las_paginas(self, page):
-        """🚀 CORREGIDO: Navega por TODAS las páginas disponibles sin límites artificiales"""
-        print("\n=== NAVEGANDO POR TODAS LAS PÁGINAS (SIN LÍMITES) ===")
+        """🚀 CORREGIDO: Navega por las páginas según límite especificado"""
+        # Determinar cuántas páginas procesar ANTES de mostrar mensajes
+        if self.total_paginas and self.total_paginas > 1:
+            paginas_a_procesar = self.max_paginas_procesar or self.total_paginas
+            limite_real = min(paginas_a_procesar, self.total_paginas)
+            
+            if self.max_paginas_procesar:
+                print(f"\n=== PROCESANDO {limite_real} PÁGINA(S) - LÍMITE: {self.max_paginas_procesar} ===")
+            else:
+                print(f"\n=== PROCESANDO TODAS LAS {limite_real} PÁGINAS (SIN LÍMITE) ===")
+                
+            print(f"📊 Total páginas detectadas: {self.total_paginas}")
+            print(f"📊 Total registros en sistema: {self.total_registros}")
+            print(f"🎯 Páginas que se procesarán: {limite_real}")
+        else:
+            print(f"\n=== PROCESANDO 1 PÁGINA - PÁGINA ÚNICA ===")
         
         # Esperar a que se cargue la primera página
         await page.wait_for_timeout(5000)
@@ -437,47 +366,47 @@ class ComprasMXScraper:
         if self.extraer_detalles:
             await self.procesar_licitaciones_en_pagina_actual(page)
         
-        # Navegar por páginas adicionales si existen
-        if self.total_paginas and self.total_paginas > 1:
+        # Navegar por páginas adicionales SOLO si hay más de 1 página Y no estamos limitando a 1
+        if self.total_paginas and self.total_paginas > 1 and (not self.max_paginas_procesar or self.max_paginas_procesar > 1):
             paginas_a_procesar = self.max_paginas_procesar or self.total_paginas
-            print(f"\n✅ PROCESANDO TODAS LAS PÁGINAS DISPONIBLES")
-            print(f"📊 Total páginas detectadas: {self.total_paginas}")
-            print(f"📊 Total registros en sistema: {self.total_registros}")
-            print(f"🎯 Páginas a procesar: {min(paginas_a_procesar, self.total_paginas)}")
-            
-            # CORRECCIÓN CLAVE: Procesar hasta el límite especificado o todas las páginas
-            limite_paginas = min(paginas_a_procesar, self.total_paginas) if self.max_paginas_procesar else self.total_paginas
+            limite_paginas = min(paginas_a_procesar, self.total_paginas)
             
             for pagina in range(2, limite_paginas + 1):
                 print(f"\n[Navegando a página {pagina}/{limite_paginas}]")
                 
-                # Método de navegación por botones de página
+                # Método de navegación usando selectores PrimeNG
                 exito = False
-                
                 try:
-                    # Buscar y hacer click en botón de página específica
-                    boton_pagina = page.locator(f"button:has-text('{pagina}')").first
-                    if await boton_pagina.is_visible():
-                        await boton_pagina.click()
+                    # Buscar botón "Siguiente" usando selector PrimeNG específico
+                    boton_siguiente = await page.query_selector("button.p-paginator-next:not(.p-disabled)")
+                    if boton_siguiente:
+                        await boton_siguiente.click()
                         await page.wait_for_load_state("networkidle")
                         await page.wait_for_timeout(5000)
-                        print(f"  ✓ Navegado a página {pagina}")
+                        print(f"  ✓ Navegado con botón PrimeNG siguiente")
                         exito = True
-                except:
-                    pass
+                    else:
+                        print(f"  ⚠️ Botón siguiente PrimeNG no disponible o deshabilitado")
+                except Exception as e:
+                    print(f"  ❌ Error con botón PrimeNG siguiente: {e}")
                 
-                # Método alternativo: botón "Siguiente"
+                # Método alternativo: botón de página específica
                 if not exito:
                     try:
-                        boton_siguiente = page.locator("button:has-text('Siguiente'), button:has-text('>')").first
-                        if await boton_siguiente.is_visible() and await boton_siguiente.is_enabled():
-                            await boton_siguiente.click()
+                        # Buscar botón de página específica
+                        boton_pagina = await page.query_selector(f"button.p-paginator-page[aria-label='Page {pagina}']")
+                        if not boton_pagina:
+                            # Fallback: buscar por texto
+                            boton_pagina = await page.query_selector(f"button:has-text('{pagina}')")
+                        
+                        if boton_pagina:
+                            await boton_pagina.click()
                             await page.wait_for_load_state("networkidle")
                             await page.wait_for_timeout(5000)
-                            print(f"  ✓ Navegado con botón siguiente")
+                            print(f"  ✓ Navegado a página {pagina} con botón específico")
                             exito = True
-                    except:
-                        pass
+                    except Exception as e:
+                        print(f"  ❌ Error con botón de página específica: {e}")
                 
                 if not exito:
                     print(f"  ❌ No se pudo navegar a página {pagina}")

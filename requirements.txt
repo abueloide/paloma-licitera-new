@@ -1,39 +1,34 @@
-# Core
+# REQUIREMENTS.TXT AUDITADO - SOLO DEPENDENCIAS REALMENTE UTILIZADAS
+
+# Core system dependencies
 python-dotenv==1.0.0
 pyyaml==6.0.1
-requests==2.31.0
 
 # Database
 psycopg2-binary>=2.9.10
 sqlalchemy>=2.0.25
 
-# Web scraping
-playwright>=1.45.0
-beautifulsoup4==4.12.2
-html5lib==1.1
-lxml==4.9.3
-
 # Data processing
 pandas>=2.2.0
 python-dateutil==2.8.2
-numpy>=1.24.0
 
-# API
+# HTML/Web processing
+beautifulsoup4==4.12.2
+requests==2.31.0
+
+# PDF Processing - pdfminer como fallback, PyMuPDF se instala dinámicamente
+pdfminer.six==20221105
+
+# Web scraping - CRÍTICO para ComprasMX, tianguis, sitios-masivos
+playwright>=1.45.0
+
+# API framework - CRÍTICO para src/api.py
 fastapi>=0.110.0
-uvicorn>=0.27.0
 pydantic>=2.6.0
+uvicorn>=0.27.0
 
-# Utilities
-chardet==5.2.0
-
-# Scheduler & Automation
-schedule==1.2.0
+# Scheduler & Automation - Solo si realmente se usa
 python-crontab==3.0.0
-pytz==2023.3
 
-# PDF Processing
-PyMuPDF==1.23.14
-pdfminer.six==20231228
-
-# AI Processing (para extracción DOF)
-anthropic>=0.64.0
+# AI Processing - CRÍTICO para DOF con IA
+anthropic==0.39.0

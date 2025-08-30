@@ -253,9 +253,24 @@ class DOFDownloader:
 
 
 def extract_text_per_page(pdf_path: str) -> list[str]:
-    """Extrae texto de cada página del PDF"""
+    """Extrae texto de cada página del PDF con instalación automática de PyMuPDF si es necesario"""
     try:
-        import fitz  # PyMuPDF
+        # Intentar importar PyMuPDF
+        try:
+            import fitz  # PyMuPDF
+        except ImportError:
+            logger.info("PyMuPDF no encontrado, intentando instalación automática...")
+            import subprocess
+            import sys
+            try:
+                # Intentar instalar PyMuPDF automáticamente
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "PyMuPDF==1.23.14"])
+                import fitz  # Importar después de la instalación
+                logger.info("✅ PyMuPDF instalado exitosamente")
+            except Exception as install_error:
+                logger.warning(f"No se pudo instalar PyMuPDF automáticamente: {install_error}")
+                raise ImportError("PyMuPDF no disponible")
+        
         doc = fitz.open(pdf_path)
         pages = []
         for page_num, page in enumerate(doc, 1):
@@ -267,7 +282,7 @@ def extract_text_per_page(pdf_path: str) -> list[str]:
         return pages
     
     except ImportError:
-        logger.warning("PyMuPDF no disponible, usando pdfminer")
+        logger.warning("PyMuPDF no disponible, usando pdfminer como alternativa")
         try:
             from pdfminer.high_level import extract_text
             txt = extract_text(pdf_path) or ""

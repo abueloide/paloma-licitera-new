@@ -238,6 +238,7 @@ clean_downloaded_data() {
     if [ -d "data/raw/comprasmx" ]; then
         rm -f data/raw/comprasmx/*.json
         rm -rf data/raw/comprasmx/detalles
+        mkdir -p data/raw/comprasmx/detalles
         print_status "Archivos ComprasMX eliminados"
     fi
     
@@ -245,6 +246,7 @@ clean_downloaded_data() {
     if [ -d "data/raw/dof" ]; then
         rm -f data/raw/dof/*.txt
         rm -f data/raw/dof/*.pdf
+        rm -f data/raw/dof/*.json
         print_status "Archivos DOF eliminados"
     fi
     
@@ -255,95 +257,20 @@ clean_downloaded_data() {
         print_status "Archivos Tianguis eliminados"
     fi
     
+    # Limpiar archivos procesados
+    if [ -d "data/processed" ]; then
+        rm -f data/processed/*
+        print_status "Archivos procesados eliminados"
+    fi
+    
     # Recrear directorios
     mkdir -p data/raw/comprasmx/detalles
     mkdir -p data/raw/dof
     mkdir -p data/raw/tianguis
     mkdir -p data/raw/sitios-masivos
+    mkdir -p data/processed
     
     print_status "Directorios de datos recreados"
-}
-
-# NUEVA FUNCIÓN: Corrida completa desde cero con scraper
-full_scraper_run() {
-    print_info "CORRIDA COMPLETA DESDE CERO CON SCRAPER ComprasMX"
-    echo "=================================================="
-    
-    # Verificar entorno virtual
-    if [ ! -d "venv" ]; then
-        print_error "Entorno virtual no encontrado. Ejecuta: ./paloma.sh install"
-        return 1
-    fi
-    
-    source venv/bin/activate
-    
-    # Verificar dependencias de Playwright
-    print_info "Verificando Playwright..."
-    if ! python -c "from playwright.async_api import async_playwright; print('OK')" 2>/dev/null | grep -q "OK"; then
-        print_warning "Instalando navegadores de Playwright..."
-        playwright install chromium
-    fi
-    
-    # Limpiar archivos anteriores
-    clean_downloaded_data
-    
-    # Ejecutar scraper ComprasMX v2 que captura UUID real
-    print_info "Ejecutando scraper ComprasMX v2 (captura hash UUID real)..."
-    
-    SCRAPER_PATH="etl-process/extractors/comprasMX/ComprasMX_v2Claude.py"
-    if [ -f "$SCRAPER_PATH" ]; then
-        cd "$(dirname "$SCRAPER_PATH")"
-        python "$(basename "$SCRAPER_PATH")"
-        SCRAPER_RESULT=$?
-        cd "$BASE_DIR"
-        
-        if [ $SCRAPER_RESULT -eq 0 ]; then
-            print_status "Scraper ejecutado exitosamente"
-            
-            # Verificar archivos generados
-            JSON_FILES=$(ls data/raw/comprasmx/*.json 2>/dev/null | wc -l)
-            DETAIL_FILES=$(ls data/raw/comprasmx/detalles/detalle_*.json 2>/dev/null | wc -l)
-            
-            print_status "Archivos generados:"
-            print_status "  - JSON principales: $JSON_FILES"
-            print_status "  - Detalles individuales: $DETAIL_FILES"
-            
-            if [ "$JSON_FILES" -gt 0 ]; then
-                # Procesar con extractor corregido
-                print_info "Procesando con extractor corregido..."
-                python src/etl.py --fuente comprasmx --solo-procesamiento
-                
-                if [ $? -eq 0 ]; then
-                    RECORDS=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT COUNT(*) FROM licitaciones;" 2>/dev/null || echo "0")
-                    print_status "CORRIDA COMPLETA EXITOSA: $RECORDS licitaciones con UUID real"
-                    
-                    # Verificar algunos UUIDs
-                    print_info "Verificando UUIDs capturados..."
-                    psql -h localhost -U postgres -d paloma_licitera -c "
-                        SELECT 
-                            numero_procedimiento, 
-                            LEFT(uuid_procedimiento, 8) || '...' as uuid_preview,
-                            LEFT(url_original, 50) || '...' as url_preview
-                        FROM licitaciones 
-                        WHERE uuid_procedimiento IS NOT NULL 
-                        LIMIT 5;
-                    "
-                else
-                    print_error "Error en procesamiento ETL"
-                    return 1
-                fi
-            else
-                print_error "No se generaron archivos JSON"
-                return 1
-            fi
-        else
-            print_error "Error ejecutando scraper"
-            return 1
-        fi
-    else
-        print_error "Scraper no encontrado: $SCRAPER_PATH"
-        return 1
-    fi
 }
 
 # =================================================================
@@ -421,7 +348,7 @@ case $COMMAND in
             if [ $TOTAL_FILES -gt 0 ]; then
                 echo "  1. ./paloma.sh download-quick  # Procesar archivos existentes"
             else
-                echo "  1. ./paloma.sh scraper-full    # Corrida completa con scraper"
+                echo "  1. ./paloma.sh download        # Descargar datos"
             fi
             echo "  2. ./paloma.sh start           # Iniciar sistema"
         else
@@ -460,18 +387,22 @@ case $COMMAND in
         python3 -m venv venv
         source venv/bin/activate
         
-        # Instalar backend - TODAS las dependencias necesarias
-        print_status "Instalando dependencias del backend..."
+        # Instalar backend - USAR requirements.txt completo
+        print_status "Instalando dependencias del backend desde requirements.txt..."
         pip install --upgrade pip
         
-        # Dependencias básicas
-        pip install fastapi uvicorn[standard] psycopg2-binary sqlalchemy pyyaml pandas python-dotenv
-        
-        # Dependencias para scrapers
-        pip install httpx beautifulsoup4 lxml requests selenium playwright
-        
-        # Dependencias para procesamiento de PDFs
-        pip install pymupdf pdfminer.six PyPDF2
+        # Instalar TODAS las dependencias del requirements.txt
+        if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+            print_status "✅ Dependencias de requirements.txt instaladas (incluye anthropic)"
+        else
+            # Fallback manual si no existe requirements.txt
+            print_warning "requirements.txt no encontrado, instalando dependencias manualmente..."
+            pip install fastapi uvicorn[standard] psycopg2-binary sqlalchemy pyyaml pandas python-dotenv
+            pip install httpx beautifulsoup4 lxml requests selenium playwright
+            pip install pymupdf pdfminer.six PyPDF2
+            pip install anthropic schedule python-crontab pytz chardet html5lib
+        fi
         
         # Instalar navegadores para playwright
         print_status "Instalando navegadores para Playwright (necesario para ComprasMX)..."
@@ -492,7 +423,7 @@ case $COMMAND in
         # Crear directorios necesarios
         mkdir -p logs
         mkdir -p data/raw/dof
-        mkdir -p data/raw/comprasmx/detalles
+        mkdir -p data/raw/comprasmx
         mkdir -p data/raw/tianguis
         mkdir -p data/raw/sitios-masivos
         mkdir -p data/processed
@@ -521,44 +452,9 @@ case $COMMAND in
         echo ""
         echo "Próximos pasos:"
         echo "  1. ./paloma.sh doctor          # Verificar que todo esté bien"
-        echo "  2. ./paloma.sh scraper-full    # Corrida completa con scraper"
+        echo "  2. ./paloma.sh download        # Descargar datos"
         echo "  3. ./paloma.sh start           # Iniciar sistema"
         echo ""
-        ;;
-        
-    scraper-full)
-        echo "🕷️ CORRIDA COMPLETA CON SCRAPER"
-        echo "==============================="
-        
-        # Verificar PostgreSQL primero
-        if ! psql -h localhost -U postgres -d paloma_licitera -c "SELECT 1;" > /dev/null 2>&1; then
-            print_error "PostgreSQL no está disponible"
-            echo "Ejecuta primero: ./paloma.sh doctor"
-            exit 1
-        fi
-        
-        print_warning "ADVERTENCIA: Esto eliminará todos los archivos descargados y datos de BD"
-        echo ""
-        echo "Este proceso:"
-        echo "1. Limpia archivos de datos existentes"
-        echo "2. Limpia tabla de BD completamente"
-        echo "3. Ejecuta scraper ComprasMX v2 para capturar UUID real"
-        echo "4. Procesa datos con extractor corregido"
-        echo ""
-        echo -n "¿Continuar? (escribe 'SI' para confirmar): "
-        read confirmacion
-        
-        if [ "$confirmacion" != "SI" ]; then
-            print_info "Operación cancelada"
-            exit 0
-        fi
-        
-        # Limpiar BD completamente
-        print_info "Limpiando base de datos..."
-        psql -h localhost -U postgres -d paloma_licitera -c "TRUNCATE TABLE licitaciones RESTART IDENTITY CASCADE;" 2>/dev/null
-        
-        # Ejecutar corrida completa
-        full_scraper_run
         ;;
         
     start)
@@ -676,16 +572,6 @@ case $COMMAND in
                     echo "  - $fuente: $count"
                 done
                 
-                # Verificar UUIDs (importante para URLs correctas)
-                UUID_COUNT=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT COUNT(*) FROM licitaciones WHERE uuid_procedimiento IS NOT NULL AND uuid_procedimiento != '';" 2>/dev/null || echo "0")
-                echo ""
-                echo "Licitaciones con UUID real: $UUID_COUNT de $RECORDS"
-                if [ "$UUID_COUNT" -gt 0 ]; then
-                    print_status "✅ UUIDs reales capturados (URLs funcionales)"
-                else
-                    print_warning "⚠️ Sin UUIDs reales (ejecuta: ./paloma.sh scraper-full)"
-                fi
-                
                 # Estadísticas por entidad federativa (si hay datos)
                 TIENE_ENTIDADES=$(psql -h localhost -U postgres -d paloma_licitera -tAc "SELECT COUNT(DISTINCT entidad_federativa) FROM licitaciones WHERE entidad_federativa IS NOT NULL;" 2>/dev/null || echo "0")
                 if [ "$TIENE_ENTIDADES" -gt 0 ]; then
@@ -720,10 +606,10 @@ case $COMMAND in
         echo "Archivos de datos:"
         [ -d "data/raw/dof" ] && DOF_FILES=$(ls data/raw/dof/*.txt 2>/dev/null | wc -l) || DOF_FILES=0
         [ -d "data/raw/comprasmx" ] && COMPRAS_FILES=$(ls data/raw/comprasmx/*.json 2>/dev/null | wc -l) || COMPRAS_FILES=0
-        [ -d "data/raw/comprasmx/detalles" ] && DETAIL_FILES=$(ls data/raw/comprasmx/detalles/detalle_*.json 2>/dev/null | wc -l) || DETAIL_FILES=0
         [ -d "data/raw/tianguis" ] && TIANGUIS_FILES=$(ls data/raw/tianguis/*.json 2>/dev/null | wc -l) || TIANGUIS_FILES=0
+        # [ -d "data/raw/sitios-masivos" ] && SITIOS_FILES=$(ls data/raw/sitios-masivos/*.jsonl 2>/dev/null | wc -l) || SITIOS_FILES=0
         echo "  - DOF: $DOF_FILES archivos TXT"
-        echo "  - ComprasMX: $COMPRAS_FILES archivos JSON + $DETAIL_FILES detalles"
+        echo "  - ComprasMX: $COMPRAS_FILES archivos JSON"
         echo "  - Tianguis: $TIANGUIS_FILES archivos JSON"
         echo "  - Sitios Masivos: DESHABILITADO TEMPORALMENTE"
         ;;
@@ -830,8 +716,8 @@ case $COMMAND in
         ;;
         
     reset-db)
-        echo "🗑️  LIMPIANDO BASE DE DATOS..."
-        echo "-----------------------------"
+        echo "🗑️  LIMPIEZA COMPLETA - BASE DE DATOS Y ARCHIVOS"
+        echo "==============================================="
         
         # Verificar PostgreSQL primero
         if ! psql -h localhost -U postgres -d paloma_licitera -c "SELECT 1;" > /dev/null 2>&1; then
@@ -841,7 +727,11 @@ case $COMMAND in
         fi
         
         echo ""
-        print_warning "ADVERTENCIA: Esto ELIMINARÁ TODOS los datos y recreará la tabla con el modelo híbrido"
+        print_warning "ADVERTENCIA: Esto ELIMINARÁ:"
+        echo "  • TODOS los datos de la base de datos"
+        echo "  • TODOS los archivos descargados (JSON, PDF, TXT)"
+        echo "  • Recreará la tabla con el modelo híbrido correcto"
+        echo ""
         echo -n "¿Estás seguro? (escribe 'SI' para confirmar): "
         read confirmacion
         
@@ -850,19 +740,22 @@ case $COMMAND in
             exit 0
         fi
         
-        print_info "Eliminando tabla antigua..."
+        print_info "1/3 Eliminando tabla antigua..."
         psql -h localhost -U postgres -d paloma_licitera -c "DROP TABLE IF EXISTS licitaciones CASCADE;" 2>/dev/null
         
-        print_info "Creando tabla con esquema híbrido correcto..."
+        print_info "2/3 Limpiando archivos descargados..."
+        clean_downloaded_data
+        
+        print_info "3/3 Creando tabla con esquema híbrido correcto..."
         create_database_tables
         
         if [ $? -eq 0 ]; then
-            print_status "Base de datos recreada con modelo híbrido"
+            print_status "✅ LIMPIEZA COMPLETA EXITOSA"
             echo ""
-            echo "Ahora puedes ejecutar:"
-            echo "  ./paloma.sh scraper-full     # Para corrida completa con scraper"
-            echo "  ./paloma.sh download-quick   # Para procesar archivos existentes"
-            echo "  ./paloma.sh download         # Para descargar nuevos datos"
+            echo "Sistema completamente limpio. Próximos pasos:"
+            echo "  ./paloma.sh download        # Descargar datos frescos"
+            echo "  ./paloma.sh download-quick  # Solo procesar archivos existentes (si los hay)"
+            echo "  ./paloma.sh status          # Verificar estado"
         else
             print_error "Error al recrear la base de datos"
             exit 1
@@ -936,25 +829,18 @@ case $COMMAND in
         echo "  logs              - Muestra los logs del sistema"
         echo ""
         echo "GESTIÓN DE DATOS:"
-        echo "  scraper-full      - 🆕 CORRIDA COMPLETA desde cero (limpia todo + scraper)"
         echo "  download          - Descarga datos de las fuentes (Sitios Masivos DESHABILITADO)"
         echo "  download-quick    - Solo procesa archivos existentes"
         echo "  reset-db          - Elimina y recrea la BD con esquema híbrido"
         echo ""
         echo "FLUJO RECOMENDADO PARA INSTALACIÓN:"
         echo "  1. ./paloma.sh install        # Instala todo automáticamente"
-        echo "  2. ./paloma.sh scraper-full   # 🆕 Corrida completa con UUID real"
+        echo "  2. ./paloma.sh download       # Descarga datos"
         echo "  3. ./paloma.sh start          # Inicia sistema"
         echo ""
         echo "SI HAY PROBLEMAS:"
         echo "  ./paloma.sh doctor            # Diagnostica y arregla automáticamente"
         echo "  ./paloma.sh reset-db          # Recrea BD con esquema híbrido correcto"
-        echo ""
-        echo "🆕 NUEVO COMANDO 'scraper-full':"
-        echo "  - Limpia archivos de datos y BD completamente"
-        echo "  - Ejecuta scraper ComprasMX v2 para capturar UUID real"
-        echo "  - Procesa con extractor corregido para fechas PostgreSQL"
-        echo "  - Resultado: URLs funcionales con hash real"
         echo ""
         echo "NOTA: Sitios Masivos está temporalmente DESHABILITADO"
         echo ""
