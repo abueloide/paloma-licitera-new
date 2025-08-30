@@ -3,6 +3,7 @@
 Scraper ComprasMX corregido para capturar hash real y descripción completa
 MODIFICADO: Capturar window.location.href para obtener hash UUID real de cada licitación
 MEJORADO: Extraer descripción detallada completa de cada licitación individual
+CORREGIDO: Eliminar límite artificial de 5 páginas - procesar TODAS las páginas disponibles
 """
 
 import asyncio
@@ -26,7 +27,7 @@ SALIDA.mkdir(parents=True, exist_ok=True)
 print(f"[INFO] Scraper ComprasMX - Guardando archivos en: {SALIDA.absolute()}")
 
 class ComprasMXScraper:
-    def __init__(self, salida_dir: Path = SALIDA):
+    def __init__(self, salida_dir: Path = SALIDA, max_paginas_procesar: int = None):
         self.salida_dir = salida_dir
         self.respuestas_capturadas = []
         self.urls_procesadas = set()
@@ -41,6 +42,9 @@ class ComprasMXScraper:
         self.carpeta_detalles = self.salida_dir / "detalles"
         self.carpeta_detalles.mkdir(parents=True, exist_ok=True)
         self.extraer_detalles = True
+        
+        # NUEVO: Control de límite de páginas (None = sin límite)
+        self.max_paginas_procesar = max_paginas_procesar
         
     def nombre_archivo(self, url: str, content_type: str, incluir_timestamp: bool = True) -> Path:
         """Genera un nombre estable y legible por URL + query."""
@@ -85,7 +89,7 @@ class ComprasMXScraper:
                 with open(ruta, "w", encoding="utf-8") as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)
                 
-                print(f"\\n[OK] JSON guardado: {ruta.name}")
+                print(f"\n[OK] JSON guardado: {ruta.name}")
                 
                 # Procesar datos según la estructura real
                 if isinstance(data, dict) and "data" in data:
@@ -128,7 +132,7 @@ class ComprasMXScraper:
         if not self.extraer_detalles:
             return
             
-        print(f"\\n=== EXTRAYENDO DETALLES CON HASH REAL - PÁGINA {self.pagina_actual} ===")
+        print(f"\n=== EXTRAYENDO DETALLES CON HASH REAL - PÁGINA {self.pagina_actual} ===")
         
         try:
             # Esperar a que la tabla se cargue
@@ -174,7 +178,7 @@ class ComprasMXScraper:
                 elif len(celdas) >= 3:
                     titulo_preliminar = (await celdas[2].text_content()).strip()
                 
-                print(f"\\n[{i}/{len(filas_tabla)}] Procesando: {codigo_expediente}")
+                print(f"\n[{i}/{len(filas_tabla)}] Procesando: {codigo_expediente}")
                 print(f"    └─ {titulo_preliminar[:60]}...")
                 
                 # Verificar si ya procesamos este detalle
@@ -250,7 +254,7 @@ class ComprasMXScraper:
                     )
                     await page.wait_for_timeout(5000)
                 
-        print(f"\\n✅ Página {self.pagina_actual} completada. Detalles extraídos: {len(self.detalles_extraidos)}")
+        print(f"\n✅ Página {self.pagina_actual} completada. Detalles extraídos: {len(self.detalles_extraidos)}")
     
     def extraer_hash_de_url(self, url_completa: str) -> str:
         """NUEVA FUNCIÓN: Extrae el hash UUID de la URL de ComprasMX"""
@@ -411,7 +415,7 @@ class ComprasMXScraper:
         """Guarda el detalle individual con hash real en archivo JSON"""
         try:
             # Limpiar código de expediente para nombre de archivo
-            codigo_limpio = re.sub(r'[^\\w\\-_.]', '_', codigo_expediente)
+            codigo_limpio = re.sub(r'[^\w\-_.]', '_', codigo_expediente)
             archivo_detalle = self.carpeta_detalles / f"detalle_{codigo_limpio}.json"
             
             with open(archivo_detalle, "w", encoding="utf-8") as f:
@@ -423,8 +427,8 @@ class ComprasMXScraper:
             print(f"    ❌ Error guardando detalle {codigo_expediente}: {e}")
     
     async def navegar_todas_las_paginas(self, page):
-        """Navega por todas las páginas procesando detalles en cada una"""
-        print("\\n=== NAVEGANDO POR TODAS LAS PÁGINAS CON EXTRACCIÓN DE DETALLES ===")
+        """🚀 CORREGIDO: Navega por TODAS las páginas disponibles sin límites artificiales"""
+        print("\n=== NAVEGANDO POR TODAS LAS PÁGINAS (SIN LÍMITES) ===")
         
         # Esperar a que se cargue la primera página
         await page.wait_for_timeout(5000)
@@ -435,10 +439,17 @@ class ComprasMXScraper:
         
         # Navegar por páginas adicionales si existen
         if self.total_paginas and self.total_paginas > 1:
-            print(f"\\nDetectadas {self.total_paginas} páginas con {self.total_registros} registros totales")
+            paginas_a_procesar = self.max_paginas_procesar or self.total_paginas
+            print(f"\n✅ PROCESANDO TODAS LAS PÁGINAS DISPONIBLES")
+            print(f"📊 Total páginas detectadas: {self.total_paginas}")
+            print(f"📊 Total registros en sistema: {self.total_registros}")
+            print(f"🎯 Páginas a procesar: {min(paginas_a_procesar, self.total_paginas)}")
             
-            for pagina in range(2, min(self.total_paginas + 1, 6)):  # Limitar a 5 páginas para prueba
-                print(f"\\n[Navegando a página {pagina}/{self.total_paginas}]")
+            # CORRECCIÓN CLAVE: Procesar hasta el límite especificado o todas las páginas
+            limite_paginas = min(paginas_a_procesar, self.total_paginas) if self.max_paginas_procesar else self.total_paginas
+            
+            for pagina in range(2, limite_paginas + 1):
+                print(f"\n[Navegando a página {pagina}/{limite_paginas}]")
                 
                 # Método de navegación por botones de página
                 exito = False
@@ -478,19 +489,25 @@ class ComprasMXScraper:
                 
                 # Verificar progreso
                 print(f"  └─ Detalles extraídos hasta ahora: {len(self.detalles_extraidos)}")
+                print(f"  └─ Expedientes totales hasta ahora: {len(self.expedientes_ids)}")
                 
                 # Pausa entre páginas para no sobrecargar el servidor
                 await page.wait_for_timeout(3000)
+        else:
+            print("\n🎯 Solo hay 1 página de resultados - procesamiento completo")
     
     async def cambiar_cantidad_resultados(self, page):
-        """Intenta cambiar la cantidad de resultados por página al máximo."""
-        print("\\n=== CAMBIANDO CANTIDAD DE RESULTADOS ===")
+        """🚀 MEJORADO: Maximizar resultados por página para capturar más datos."""
+        print("\n=== MAXIMIZANDO RESULTADOS POR PÁGINA ===")
         
         selectores = [
             "select",
             "[class*='per-page']",
             "[class*='page-size']",
-            "[class*='items-per']"
+            "[class*='items-per']",
+            "[class*='pageSize']",
+            "select[name*='size']",
+            "select[name*='page']"
         ]
         
         for selector in selectores:
@@ -509,26 +526,29 @@ class ComprasMXScraper:
                         if valores:
                             max_valor = max(valores)
                             if max_valor > 10:
-                                print(f"  └─ Cambiando a mostrar {max_valor} resultados por página")
+                                print(f"  🎯 Maximizando a {max_valor} resultados por página")
                                 await elemento.select_option(str(max_valor))
-                                await page.wait_for_timeout(3000)
+                                await page.wait_for_timeout(5000)
+                                print(f"  ✅ Configurado para mostrar {max_valor} resultados por página")
                                 return True
             except:
                 pass
         
-        print("  └─ Usando valor por defecto de resultados por página")
+        print("  ⚠️ No se pudo cambiar cantidad de resultados - usando valor por defecto")
         return False
     
-    async def ejecutar(self, headless: bool = True, extraer_detalles: bool = True):
-        """Ejecuta el scraper completo con extracción de hash real y descripción"""
+    async def ejecutar(self, headless: bool = True, extraer_detalles: bool = True, max_paginas: int = None):
+        """🚀 MEJORADO: Ejecuta el scraper completo sin límites artificiales"""
         self.extraer_detalles = extraer_detalles
+        self.max_paginas_procesar = max_paginas
         
-        print(f"\\n{'='*70}")
-        print(f"SCRAPER COMPRASMX - CAPTURA HASH REAL + DESCRIPCIÓN COMPLETA")
+        print(f"\n{'='*70}")
+        print(f"SCRAPER COMPRASMX - CAPTURA COMPLETA SIN LÍMITES")
         print(f"Hora: {datetime.now()}")
         print(f"Modo: {'Headless' if headless else 'Visible'}")
         print(f"Extraer detalles con hash real: {'Sí' if extraer_detalles else 'No'}")
-        print(f"{'='*70}\\n")
+        print(f"Límite de páginas: {'Sin límite' if not max_paginas else str(max_paginas)}")
+        print(f"{'='*70}\n")
         
         async with async_playwright() as p:
             browser = await p.chromium.launch(
@@ -560,15 +580,15 @@ class ComprasMXScraper:
             print(f"  └─ Primera carga: {len(self.expedientes_ids)} expedientes")
             
             # 2. Optimizar resultados por página
-            print("\\n[2/4] Optimizando cantidad de resultados...")
+            print("\n[2/4] Maximizando resultados por página...")
             await self.cambiar_cantidad_resultados(page)
             
-            # 3. Navegar por páginas extrayendo detalles
-            print("\\n[3/4] Navegando y extrayendo detalles con hash real...")
+            # 3. Navegar por TODAS las páginas extrayendo detalles
+            print("\n[3/4] Navegando por TODAS las páginas (sin límites)...")
             await self.navegar_todas_las_paginas(page)
             
             # 4. Guardar resultados
-            print("\\n[4/4] Guardando resultados...")
+            print("\n[4/4] Guardando resultados...")
             await self.guardar_resultados()
             
             await browser.close()
@@ -607,6 +627,8 @@ class ComprasMXScraper:
             "detalles_extraidos": len(self.detalles_extraidos),
             "expedientes_con_hash_real": len([e for e in self.expedientes_totales if e.get("hash_uuid_real")]),
             "porcentaje_hash_real": (len([e for e in self.expedientes_totales if e.get("hash_uuid_real")]) / len(self.expedientes_totales) * 100) if self.expedientes_totales else 0,
+            "paginas_procesadas": self.pagina_actual,
+            "cobertura_sistema": (len(self.expedientes_ids) / self.total_registros * 100) if self.total_registros else 0,
             "codigos_expedientes": sorted(list(self.expedientes_ids))
         }
         
@@ -623,7 +645,7 @@ class ComprasMXScraper:
                 "detalles_con_hash": len([d for d in self.detalles_extraidos.values() if d.get("hash_uuid_real")]),
                 "detalles": {
                     codigo: {
-                        "archivo": f"detalle_{re.sub(r'[^\\\\w\\\\-_.]', '_', codigo)}.json",
+                        "archivo": f"detalle_{re.sub(r'[^\w\-_.]', '_', codigo)}.json",
                         "url_completa": detalle.get("url_completa_con_hash", ""),
                         "hash_uuid_real": detalle.get("hash_uuid_real", ""),
                         "descripcion_longitud": len(detalle.get("descripcion_completa", "")),
@@ -639,21 +661,24 @@ class ComprasMXScraper:
             print(f"  └─ Índice de detalles con hash real guardado en: {archivo_indice.name}")
     
     def mostrar_estadisticas(self):
-        """Muestra estadísticas finales incluyendo hash real capturado"""
-        print(f"\\n{'='*70}")
-        print("ESTADÍSTICAS FINALES - CAPTURA CON HASH REAL")
+        """🚀 MEJORADO: Muestra estadísticas completas de captura"""
+        print(f"\n{'='*70}")
+        print("ESTADÍSTICAS FINALES - CAPTURA COMPLETA")
         print(f"{'='*70}")
-        print(f"✓ Expedientes capturados: {len(self.expedientes_ids)}")
-        print(f"✓ Total en el sistema: {self.total_registros}")
+        print(f"✓ Expedientes capturados: {len(self.expedientes_ids):,}")
+        print(f"✓ Total en el sistema: {self.total_registros:,}")
+        print(f"✓ Páginas procesadas: {self.pagina_actual}")
         if self.total_registros:
-            porcentaje = (len(self.expedientes_ids) / self.total_registros * 100)
-            print(f"✓ Porcentaje capturado: {porcentaje:.1f}%")
+            cobertura = (len(self.expedientes_ids) / self.total_registros * 100)
+            print(f"✓ Cobertura del sistema: {cobertura:.1f}%")
+            if cobertura < 90:
+                print(f"⚠️ COBERTURA INCOMPLETA - Considera aumentar límite de páginas")
         
         # Estadísticas de hash real
         if self.extraer_detalles:
             expedientes_con_hash = len([e for e in self.expedientes_totales if e.get("hash_uuid_real")])
-            print(f"✓ Detalles individuales extraídos: {len(self.detalles_extraidos)}")
-            print(f"✓ Expedientes con hash UUID real: {expedientes_con_hash}")
+            print(f"✓ Detalles individuales extraídos: {len(self.detalles_extraidos):,}")
+            print(f"✓ Expedientes con hash UUID real: {expedientes_con_hash:,}")
             if self.expedientes_totales:
                 porcentaje_hash = (expedientes_con_hash / len(self.expedientes_totales) * 100)
                 print(f"✓ Cobertura hash real: {porcentaje_hash:.1f}%")
@@ -666,17 +691,38 @@ class ComprasMXScraper:
                     print(f"  {i}. {hash_ejemplo}")
         
         print(f"✓ Archivos guardados en: {self.salida_dir.absolute()}")
-        print(f"\\n{'='*70}")
-        print(f"CAPTURA CON HASH REAL COMPLETADA: {datetime.now()}")
-        print(f"{'='*70}\\n")
+        
+        # Recomendación final
+        if self.total_registros and len(self.expedientes_ids) < self.total_registros:
+            faltantes = self.total_registros - len(self.expedientes_ids)
+            print(f"\n📋 RECOMENDACIÓN:")
+            print(f"   - Faltan {faltantes:,} expedientes por capturar")
+            print(f"   - Ejecutar sin límite de páginas para captura completa")
+        
+        print(f"\n{'='*70}")
+        print(f"CAPTURA COMPLETADA: {datetime.now()}")
+        print(f"{'='*70}\n")
 
 
 async def main():
-    """Función principal con extracción de hash real"""
+    """Función principal mejorada con opciones flexibles"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Scraper ComprasMX sin límites')
+    parser.add_argument('--headless', action='store_true', help='Ejecutar en modo headless')
+    parser.add_argument('--no-detalles', action='store_true', help='No extraer detalles individuales')
+    parser.add_argument('--max-paginas', type=int, help='Límite máximo de páginas a procesar')
+    
+    args = parser.parse_args()
+    
     scraper = ComprasMXScraper()
     
-    # Ejecutar con extracción de detalles habilitada para capturar hash real
-    await scraper.ejecutar(headless=True, extraer_detalles=True)
+    # Ejecutar con parámetros especificados
+    await scraper.ejecutar(
+        headless=args.headless,
+        extraer_detalles=not args.no_detalles,
+        max_paginas=args.max_paginas
+    )
 
 
 if __name__ == "__main__":
