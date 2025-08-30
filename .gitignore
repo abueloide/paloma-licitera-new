@@ -18,6 +18,7 @@ ENV/
 
 # Config local
 config.yaml
+.env
 
 # Data
 data/
