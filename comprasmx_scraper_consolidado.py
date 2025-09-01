@@ -4,16 +4,16 @@ ComprasMX Scraper Consolidado - Versión Simplificada
 ====================================================
 
 OBJETIVO:
-1. Extraer UUIDs de ComprasMX usando window.location.href (método real)
+1. Extraer UUIDs de ComprasMX directamente del href dinámico (SIN click)
 2. Ir a cada licitación individual y extraer texto completo
 3. Usar Claude Haiku para estructurar datos específicos
 4. Output: JSON estructurado
 
-SIMPLIFICADO: UN SOLO método de extracción - el que funciona realmente
-BASADO EN: ComprasMX_v2Claude.py que usa window.location.href
+MÉTODO PROBADO: Extraer UUID directamente del href del enlace dinámico
+BASADO EN: Script base que funciona con enlaces dinámicos
 
 Autor: Claude + Usuario
-Versión: 2.0 - Método único window.location.href
+Versión: 2.1 - Extracción directa de href dinámico
 """
 
 import time
@@ -90,10 +90,10 @@ class LicitacionCompleta:
     procesado_haiku: bool = False
     error_haiku: Optional[str] = None
 
-class ComprasMXScraperSimplificado:
+class ComprasMXScraperDirecto:
     """
-    Scraper simplificado para ComprasMX
-    USA UN SOLO MÉTODO: window.location.href después del click
+    Scraper para ComprasMX
+    MÉTODO DIRECTO: Extraer UUID del href dinámico sin hacer click
     """
 
     def __init__(self, headless: bool = True, anthropic_api_key: str = None):
@@ -149,73 +149,90 @@ class ComprasMXScraperSimplificado:
             raise
 
     def navegar_sitio_principal(self) -> bool:
-        """Navegar al sitio principal y esperar que cargue la tabla"""
+        """Navegar al sitio principal y esperar que cargue la tabla dinámica"""
         logger.info(f"🌐 Navegando a ComprasMX: {self.base_url}")
         
         try:
             self.driver.get(self.base_url)
-            time.sleep(8)  # Espera inicial
             
-            # Verificar que la tabla esté presente
-            tabla_presente = self.wait.until(
-                EC.presence_of_element_located((By.TAG_NAME, "table"))
+            # CRÍTICO: Esperar que se cargue la tabla DINÁMICA con Angular
+            logger.info("⏳ Esperando carga dinámica de la tabla...")
+            table_body = self.wait.until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "table tbody"))
             )
             
-            if tabla_presente:
-                logger.info("✅ Sitio cargado exitosamente")
-                return True
+            # Espera adicional para que se carguen todos los enlaces
+            time.sleep(5)
+            
+            logger.info("✅ Tabla dinámica cargada exitosamente")
+            return True
                 
         except Exception as e:
             logger.error(f"❌ Error cargando sitio: {e}")
         
         return False
 
-    def obtener_filas_validas(self) -> List:
-        """Obtener filas válidas de la tabla principal"""
+    def obtener_filas_validas_con_enlaces(self) -> List:
+        """Obtener filas válidas que contengan enlaces dinámicos"""
         try:
-            all_rows = self.driver.find_elements(By.TAG_NAME, "tr")
+            # Buscar filas en el tbody ya cargado dinámicamente
+            table_body = self.driver.find_element(By.CSS_SELECTOR, "table tbody")
+            rows = table_body.find_elements(By.TAG_NAME, "tr")
+            
             filas_validas = []
             
-            for row in all_rows:
-                celdas = row.find_elements(By.TAG_NAME, "td")
-                if len(celdas) >= 5:  # Verificar columnas suficientes
-                    texto_primera_celda = celdas[0].text.strip()
-                    # Filtrar filas de header y vacías
-                    if (texto_primera_celda and 
-                        len(texto_primera_celda) > 3 and 
-                        not texto_primera_celda.lower().startswith(("número", "no.", "#"))):
-                        filas_validas.append(row)
+            for row in rows:
+                cols = row.find_elements(By.TAG_NAME, "td")
+                if len(cols) >= 2:  # Al menos 2 columnas
+                    try:
+                        # Buscar enlace en la segunda columna (columna 1, índice 1)
+                        enlace_elem = cols[1].find_element(By.TAG_NAME, "a")
+                        if enlace_elem:
+                            filas_validas.append(row)
+                    except NoSuchElementException:
+                        # Esta fila no tiene enlace, saltar
+                        continue
             
-            logger.info(f"📊 Encontradas {len(filas_validas)} filas válidas de licitaciones")
+            logger.info(f"📊 Encontradas {len(filas_validas)} filas con enlaces dinámicos")
             return filas_validas
             
         except Exception as e:
-            logger.error(f"❌ Error obteniendo filas: {e}")
+            logger.error(f"❌ Error obteniendo filas con enlaces: {e}")
             return []
 
     def extraer_uuid_fila(self, fila, indice: int) -> Optional[LicitacionUUID]:
         """
-        Extraer UUID de una fila usando SOLO window.location.href
-        MÉTODO ÚNICO - como en ComprasMX_v2Claude.py
+        Extraer UUID de una fila directamente del href dinámico (SIN CLICK)
+        MÉTODO DIRECTO basado en script base funcional
         """
         try:
-            # Extraer información básica de la fila
+            # Obtener celdas de la fila
             celdas = fila.find_elements(By.TAG_NAME, "td")
             if len(celdas) < 5:
                 return None
             
-            info_basica = {
-                'numero_identificacion': celdas[0].text.strip(),
-                'caracter': celdas[1].text.strip(),
-                'titulo': celdas[2].text.strip(),
-                'dependencia': celdas[3].text.strip(),
-                'estatus': celdas[4].text.strip(),
-            }
+            # Extraer información básica de las celdas
+            info_basica = {}
+            try:
+                info_basica['numero_identificacion'] = celdas[1].text.strip()  # Segunda columna
+                info_basica['caracter'] = celdas[2].text.strip() if len(celdas) > 2 else ""
+                info_basica['titulo'] = celdas[3].text.strip() if len(celdas) > 3 else ""
+                info_basica['dependencia'] = celdas[4].text.strip() if len(celdas) > 4 else ""
+                info_basica['estatus'] = celdas[5].text.strip() if len(celdas) > 5 else ""
+            except Exception as e:
+                logger.debug(f"    ⚠️ Error extrayendo info básica: {e}")
+                info_basica = {
+                    'numero_identificacion': 'N/A',
+                    'caracter': 'N/A', 
+                    'titulo': 'N/A',
+                    'dependencia': 'N/A',
+                    'estatus': 'N/A'
+                }
             
             logger.debug(f"[{indice+1}] {info_basica['numero_identificacion']}: {info_basica['titulo'][:50]}...")
             
-            # MÉTODO ÚNICO: Click y capturar window.location.href
-            uuid_extraido = self._extraer_uuid_window_location(celdas[0])
+            # MÉTODO DIRECTO: Extraer UUID del href dinámico
+            uuid_extraido = self._extraer_uuid_del_href_dinamico(celdas[1])
             
             if uuid_extraido:
                 return LicitacionUUID(
@@ -234,70 +251,55 @@ class ComprasMXScraperSimplificado:
             logger.error(f"❌ Error extrayendo UUID de fila {indice+1}: {e}")
             return None
 
-    def _extraer_uuid_window_location(self, celda_objetivo) -> Optional[str]:
+    def _extraer_uuid_del_href_dinamico(self, celda_enlace) -> Optional[str]:
         """
-        MÉTODO ÚNICO: Click y usar window.location.href para obtener UUID real
-        Basado en el método funcional de ComprasMX_v2Claude.py
+        MÉTODO DIRECTO: Extraer UUID del href del enlace dinámico (SIN CLICK)
+        Basado en el script base que funciona
         """
         try:
-            logger.debug("    🔄 Click y captura window.location.href...")
+            logger.debug("    🔗 Buscando enlace dinámico en la celda...")
             
-            # 1. HACER CLICK EN LA CELDA
-            celda_objetivo.click()
-            time.sleep(3)  # Esperar navegación
+            # Buscar el enlace <a> dentro de la celda
+            enlace_elem = celda_enlace.find_element(By.TAG_NAME, "a")
             
-            # 2. CAPTURAR URL REAL USANDO window.location.href
-            url_completa_real = self.driver.execute_script("return window.location.href;")
-            logger.debug(f"    🌐 URL capturada: {url_completa_real}")
+            # Obtener el href del enlace dinámico
+            href = enlace_elem.get_attribute("href")
+            logger.debug(f"    📍 Href encontrado: {href}")
             
-            # 3. EXTRAER UUID DEL PATRÓN DE URL
-            if "/detalle/" in url_completa_real:
+            if href and "/detalle/" in href:
+                # Extraer UUID del patrón de URL
                 patron = r'/detalle/([a-f0-9]{32})/'
-                match = re.search(patron, url_completa_real)
+                match = re.search(patron, href)
                 
                 if match:
                     uuid = match.group(1)
-                    logger.debug(f"    🔑 UUID extraído: {uuid}")
-                    
-                    # 4. REGRESAR AL LISTADO
-                    self.driver.back()
-                    time.sleep(2)
+                    logger.debug(f"    ✅ UUID extraído del href: {uuid}")
                     return uuid
                 else:
-                    logger.debug("    ❌ No se encontró UUID en la URL")
+                    logger.debug("    ❌ No se encontró patrón UUID en href")
             else:
-                logger.debug("    ❌ URL no navega a detalle")
-            
-            # Si llegamos aquí, algo falló - regresar si es posible
-            if "/detalle/" in url_completa_real:
-                self.driver.back()
-                time.sleep(1)
+                logger.debug("    ❌ Href no contiene /detalle/")
             
             return None
             
+        except NoSuchElementException:
+            logger.debug("    ❌ No se encontró enlace <a> en la celda")
+            return None
         except Exception as e:
-            logger.debug(f"    ❌ Error en extracción UUID: {e}")
-            # Intentar regresar en caso de error
-            try:
-                current_url = self.driver.execute_script("return window.location.href;")
-                if "/detalle/" in current_url:
-                    self.driver.back()
-                    time.sleep(1)
-            except:
-                pass
+            logger.debug(f"    ❌ Error extrayendo href: {e}")
             return None
 
     def extraer_todas_uuids(self, limite: int = 10) -> List[LicitacionUUID]:
         """
-        Extraer UUIDs de todas las licitaciones usando método único
+        Extraer UUIDs de todas las licitaciones usando método directo del href
         """
         logger.info(f"🔍 Iniciando extracción de UUIDs (límite: {limite})")
-        logger.info("🎯 MÉTODO ÚNICO: window.location.href después de click")
+        logger.info("🎯 MÉTODO DIRECTO: Extraer UUID del href dinámico SIN CLICK")
         
         if not self.navegar_sitio_principal():
             return []
         
-        filas_validas = self.obtener_filas_validas()
+        filas_validas = self.obtener_filas_validas_con_enlaces()
         if not filas_validas:
             return []
         
@@ -309,17 +311,7 @@ class ComprasMXScraperSimplificado:
         
         for i, fila in enumerate(filas_a_procesar):
             self.stats['total_intentos'] += 1
-            logger.info(f"[{i+1}/{len(filas_a_procesar)}] Extrayendo UUID...")
-            
-            # Re-obtener filas frescas para evitar stale elements
-            if i > 0:
-                time.sleep(1)
-                filas_actuales = self.obtener_filas_validas()
-                if i < len(filas_actuales):
-                    fila = filas_actuales[i]
-                else:
-                    logger.warning(f"Fila {i+1} ya no disponible, continuando...")
-                    continue
+            logger.info(f"[{i+1}/{len(filas_a_procesar)}] Extrayendo UUID del href...")
             
             licitacion = self.extraer_uuid_fila(fila, i)
             
@@ -331,8 +323,8 @@ class ComprasMXScraperSimplificado:
                 self.stats['errores'] += 1
                 logger.warning(f"    ❌ No se pudo extraer UUID")
             
-            # Pausa entre extracciones
-            time.sleep(1)
+            # Pausa mínima entre extracciones
+            time.sleep(0.2)
         
         logger.info(f"✅ Extracción completada: {len(licitaciones_con_uuid)}/{len(filas_a_procesar)} UUIDs exitosos")
         return licitaciones_con_uuid
@@ -361,8 +353,13 @@ class ComprasMXScraperSimplificado:
             logger.debug(f"    🔗 Navegando a: {licitacion.url_detalle}")
             self.driver.get(licitacion.url_detalle)
             
-            # Esperar que cargue el contenido
-            time.sleep(8)  # Tiempo suficiente para carga completa
+            # Esperar que cargue el componente de detalle específico
+            try:
+                self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "app-procedimiento-detalle")))
+                logger.debug("    ✅ Componente de detalle cargado")
+            except:
+                logger.debug("    ⚠️ Componente específico no encontrado, esperando carga general")
+                time.sleep(8)
             
             # Extraer texto completo usando document.body.textContent
             logger.debug("    📄 Extrayendo texto completo...")
@@ -496,7 +493,7 @@ TEXTO A ANALIZAR:
         """Guardar resultados en formato JSON"""
         if not archivo:
             timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-            archivo = f"comprasmx_simplificado_{timestamp}.json"
+            archivo = f"comprasmx_directo_{timestamp}.json"
         
         # Convertir dataclasses a dict para JSON
         datos_json = []
@@ -533,7 +530,7 @@ TEXTO A ANALIZAR:
 
     def ejecutar_proceso_completo(self, limite: int = 1) -> Dict:
         """
-        Ejecutar proceso completo: extracción de UUIDs + procesamiento con Haiku
+        Ejecutar proceso completo: extracción directa de UUIDs + procesamiento con Haiku
         
         Args:
             limite: Número de licitaciones a procesar (para primera iteración)
@@ -541,16 +538,16 @@ TEXTO A ANALIZAR:
         Returns:
             Dict con estadísticas y resultados
         """
-        logger.info("🚀 INICIANDO SCRAPER SIMPLIFICADO COMPRASMX")
-        logger.info("🎯 MÉTODO ÚNICO: window.location.href")
+        logger.info("🚀 INICIANDO SCRAPER DIRECTO COMPRASMX")
+        logger.info("🎯 MÉTODO DIRECTO: Extraer UUID del href dinámico SIN CLICK")
         logger.info("=" * 60)
         
         try:
             # Configurar driver
             self.configurar_driver()
             
-            # Fase 1: Extraer UUIDs
-            logger.info("\n📋 FASE 1: EXTRACCIÓN DE UUIDs CON MÉTODO ÚNICO")
+            # Fase 1: Extraer UUIDs directamente
+            logger.info("\n📋 FASE 1: EXTRACCIÓN DIRECTA DE UUIDs DEL HREF")
             licitaciones_uuid = self.extraer_todas_uuids(limite=limite)
             
             if not licitaciones_uuid:
@@ -593,10 +590,10 @@ TEXTO A ANALIZAR:
 
 def main():
     """
-    Función principal para ejecutar el scraper simplificado
+    Función principal para ejecutar el scraper directo
     """
     # Configuración
-    LIMITE = 1  # Solo 1 para primera iteración de prueba
+    LIMITE = 3  # Probar con 3 licitaciones
     HEADLESS = False  # False para ver qué está pasando
     
     # Verificar clave de Anthropic desde .env
@@ -610,13 +607,13 @@ def main():
     
     print(f"✅ ANTHROPIC_API_KEY cargada desde .env: {api_key[:10]}...")
     
-    # Ejecutar scraper simplificado
-    scraper = ComprasMXScraperSimplificado(headless=HEADLESS, anthropic_api_key=api_key)
+    # Ejecutar scraper directo
+    scraper = ComprasMXScraperDirecto(headless=HEADLESS, anthropic_api_key=api_key)
     resultado = scraper.ejecutar_proceso_completo(limite=LIMITE)
     
     if resultado.get("success"):
-        print(f"\n✅ SCRAPER SIMPLIFICADO COMPLETADO EXITOSAMENTE")
-        print(f"🎯 MÉTODO ÚNICO: window.location.href funcionó correctamente")
+        print(f"\n✅ SCRAPER DIRECTO COMPLETADO EXITOSAMENTE")
+        print(f"🎯 MÉTODO DIRECTO: Extracción del href dinámico funcionó")
         print(f"📁 Archivo JSON generado: {resultado['archivo_generado']}")
         print(f"📊 UUIDs procesados: {resultado['stats']['uuids_extraidos']}")
         print(f"🤖 Procesados con Haiku: {resultado['stats']['procesadas_con_haiku']}")
@@ -633,6 +630,7 @@ def main():
                 print(f"  Dependencia: {primer_resultado.dependencia_entidad}")
     else:
         print(f"❌ ERROR: {resultado.get('error')}")
+        print("🤔 Si el método directo no funciona, necesitaremos volver al método con click")
 
 if __name__ == "__main__":
     main()
