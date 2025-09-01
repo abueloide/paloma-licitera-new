@@ -14,7 +14,7 @@ SIMPLIFICADO: Sin dependencias innecesarias, código limpio
 ROBUSTO: Manejo de errores, logging, reintentos
 
 Autor: Claude + Usuario
-Versión: 1.0 - Primera iteración de prueba
+Versión: 1.1 - Carga API key desde .env
 """
 
 import time
@@ -24,6 +24,16 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
+import os
+
+# Cargar variables de entorno desde .env
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+    print("✅ Variables de entorno cargadas desde .env")
+except ImportError:
+    print("⚠️  python-dotenv no instalado, usando variables de entorno del sistema")
+    print("   Para instalar: pip install python-dotenv")
 
 # Selenium imports
 from selenium import webdriver
@@ -36,7 +46,6 @@ from selenium.webdriver.common.action_chains import ActionChains
 
 # Anthropic import
 import anthropic
-import os
 
 # Configurar logging
 logging.basicConfig(
@@ -95,14 +104,20 @@ class ComprasMXScraperConsolidado:
         self.wait = None
         self.headless = headless
         
-        # Configurar cliente Anthropic
+        # ACTUALIZADO: Configurar cliente Anthropic con carga desde .env
         api_key = anthropic_api_key or os.getenv('ANTHROPIC_API_KEY')
-        if api_key:
+        if api_key and api_key.strip() and api_key != 'your_api_key_here':
             self.anthropic_client = anthropic.Anthropic(api_key=api_key)
-            logger.info("✅ Cliente Claude Haiku configurado")
+            logger.info("✅ Cliente Claude Haiku configurado desde .env")
         else:
             self.anthropic_client = None
-            logger.warning("⚠️  ANTHROPIC_API_KEY no configurada - scraper funcionará sin IA")
+            if not api_key:
+                logger.warning("⚠️  ANTHROPIC_API_KEY no encontrada en .env")
+            elif api_key == 'your_api_key_here':
+                logger.warning("⚠️  ANTHROPIC_API_KEY tiene valor por defecto - actualiza tu .env")
+            else:
+                logger.warning("⚠️  ANTHROPIC_API_KEY está vacía en .env")
+            logger.warning("   Scraper funcionará sin IA - solo extracción de texto")
         
         # Estadísticas
         self.stats = {
@@ -640,13 +655,16 @@ def main():
     LIMITE = 1  # Solo 1 para primera iteración de prueba
     HEADLESS = False  # False para ver qué está pasando, cambiar a True para producción
     
-    # Verificar clave de Anthropic
+    # ACTUALIZADO: Verificar clave de Anthropic desde .env
     api_key = os.getenv('ANTHROPIC_API_KEY')
-    if not api_key:
-        logger.error("❌ ANTHROPIC_API_KEY no configurada")
-        logger.error("   Configura la clave antes de ejecutar:")
-        logger.error("   export ANTHROPIC_API_KEY='tu_clave_aqui'")
+    if not api_key or api_key == 'your_api_key_here':
+        logger.error("❌ ANTHROPIC_API_KEY no configurada correctamente en .env")
+        logger.error("   1. Copia .env.example a .env: cp .env.example .env")
+        logger.error("   2. Edita .env y pon tu clave real de Anthropic")
+        logger.error("   3. Asegúrate que no sea 'your_api_key_here'")
         return
+    
+    print(f"✅ ANTHROPIC_API_KEY cargada desde .env: {api_key[:10]}...")
     
     # Ejecutar scraper
     scraper = ComprasMXScraperConsolidado(headless=HEADLESS, anthropic_api_key=api_key)
