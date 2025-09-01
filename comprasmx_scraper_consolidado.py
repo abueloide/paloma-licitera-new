@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
 """
-ComprasMX Scraper Consolidado - Versión Única
-==============================================
+ComprasMX Scraper Consolidado - Versión Simplificada
+====================================================
 
 OBJETIVO:
-1. Extraer todas las UUIDs de ComprasMX sitio principal
+1. Extraer UUIDs de ComprasMX usando window.location.href (método real)
 2. Ir a cada licitación individual y extraer texto completo
 3. Usar Claude Haiku para estructurar datos específicos
-4. Output: JSON estructurado (primera iteración)
+4. Output: JSON estructurado
 
-BASADO EN: Mejores prácticas de los 5 scrapers existentes
-SIMPLIFICADO: Sin dependencias innecesarias, código limpio
-ROBUSTO: Manejo de errores, logging, reintentos
+SIMPLIFICADO: UN SOLO método de extracción - el que funciona realmente
+BASADO EN: ComprasMX_v2Claude.py que usa window.location.href
 
 Autor: Claude + Usuario
-Versión: 1.1 - Carga API key desde .env
+Versión: 2.0 - Método único window.location.href
 """
 
 import time
@@ -42,7 +41,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
-from selenium.webdriver.common.action_chains import ActionChains
 
 # Anthropic import
 import anthropic
@@ -92,10 +90,10 @@ class LicitacionCompleta:
     procesado_haiku: bool = False
     error_haiku: Optional[str] = None
 
-class ComprasMXScraperConsolidado:
+class ComprasMXScraperSimplificado:
     """
-    Scraper consolidado para ComprasMX
-    Combina lo mejor de los 5 scrapers existentes en una versión única
+    Scraper simplificado para ComprasMX
+    USA UN SOLO MÉTODO: window.location.href después del click
     """
 
     def __init__(self, headless: bool = True, anthropic_api_key: str = None):
@@ -104,20 +102,14 @@ class ComprasMXScraperConsolidado:
         self.wait = None
         self.headless = headless
         
-        # ACTUALIZADO: Configurar cliente Anthropic con carga desde .env
+        # Configurar cliente Anthropic
         api_key = anthropic_api_key or os.getenv('ANTHROPIC_API_KEY')
         if api_key and api_key.strip() and api_key != 'your_api_key_here':
             self.anthropic_client = anthropic.Anthropic(api_key=api_key)
             logger.info("✅ Cliente Claude Haiku configurado desde .env")
         else:
             self.anthropic_client = None
-            if not api_key:
-                logger.warning("⚠️  ANTHROPIC_API_KEY no encontrada en .env")
-            elif api_key == 'your_api_key_here':
-                logger.warning("⚠️  ANTHROPIC_API_KEY tiene valor por defecto - actualiza tu .env")
-            else:
-                logger.warning("⚠️  ANTHROPIC_API_KEY está vacía en .env")
-            logger.warning("   Scraper funcionará sin IA - solo extracción de texto")
+            logger.warning("⚠️  Haiku no configurado - scraper funcionará sin IA")
         
         # Estadísticas
         self.stats = {
@@ -136,13 +128,12 @@ class ComprasMXScraperConsolidado:
         if self.headless:
             chrome_options.add_argument("--headless")
         
-        # Opciones optimizadas basadas en scrapers existentes
+        # Opciones optimizadas
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage") 
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--window-size=1920,1080")
         chrome_options.add_argument("--disable-extensions")
-        chrome_options.add_argument("--disable-images")  # Acelerar carga
         
         # User agent para evitar detección
         chrome_options.add_argument(
@@ -161,42 +152,22 @@ class ComprasMXScraperConsolidado:
         """Navegar al sitio principal y esperar que cargue la tabla"""
         logger.info(f"🌐 Navegando a ComprasMX: {self.base_url}")
         
-        max_intentos = 3
-        for intento in range(max_intentos):
-            try:
-                logger.info(f"📡 Intento {intento + 1}/{max_intentos}")
-                self.driver.get(self.base_url)
+        try:
+            self.driver.get(self.base_url)
+            time.sleep(8)  # Espera inicial
+            
+            # Verificar que la tabla esté presente
+            tabla_presente = self.wait.until(
+                EC.presence_of_element_located((By.TAG_NAME, "table"))
+            )
+            
+            if tabla_presente:
+                logger.info("✅ Sitio cargado exitosamente")
+                return True
                 
-                # Esperar carga inicial
-                time.sleep(5)
-                
-                # Verificar que la tabla de licitaciones esté presente
-                tabla_presente = self.wait.until(
-                    EC.presence_of_element_located((By.TAG_NAME, "table"))
-                )
-                
-                if tabla_presente:
-                    logger.info("✅ Sitio cargado exitosamente - tabla presente")
-                    
-                    # Scroll para asegurar carga completa
-                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                    time.sleep(2)
-                    self.driver.execute_script("window.scrollTo(0, 0);")
-                    time.sleep(1)
-                    
-                    return True
-                    
-            except TimeoutException:
-                logger.warning(f"⏳ Timeout en intento {intento + 1}")
-                if intento < max_intentos - 1:
-                    time.sleep(10)
-                    
-            except Exception as e:
-                logger.error(f"❌ Error en intento {intento + 1}: {e}")
-                if intento < max_intentos - 1:
-                    time.sleep(10)
+        except Exception as e:
+            logger.error(f"❌ Error cargando sitio: {e}")
         
-        logger.error("❌ No se pudo cargar el sitio después de todos los intentos")
         return False
 
     def obtener_filas_validas(self) -> List:
@@ -224,8 +195,8 @@ class ComprasMXScraperConsolidado:
 
     def extraer_uuid_fila(self, fila, indice: int) -> Optional[LicitacionUUID]:
         """
-        Extraer UUID de una fila específica usando múltiples métodos robustos
-        Basado en los mejores métodos de los scrapers existentes
+        Extraer UUID de una fila usando SOLO window.location.href
+        MÉTODO ÚNICO - como en ComprasMX_v2Claude.py
         """
         try:
             # Extraer información básica de la fila
@@ -243,8 +214,8 @@ class ComprasMXScraperConsolidado:
             
             logger.debug(f"[{indice+1}] {info_basica['numero_identificacion']}: {info_basica['titulo'][:50]}...")
             
-            # Intentar extraer UUID con múltiples métodos
-            uuid_extraido = self._extraer_uuid_con_multiples_metodos(celdas[0])
+            # MÉTODO ÚNICO: Click y capturar window.location.href
+            uuid_extraido = self._extraer_uuid_window_location(celdas[0])
             
             if uuid_extraido:
                 return LicitacionUUID(
@@ -263,92 +234,65 @@ class ComprasMXScraperConsolidado:
             logger.error(f"❌ Error extrayendo UUID de fila {indice+1}: {e}")
             return None
 
-    def _extraer_uuid_con_multiples_metodos(self, celda_objetivo) -> Optional[str]:
+    def _extraer_uuid_window_location(self, celda_objetivo) -> Optional[str]:
         """
-        Múltiples métodos para extraer UUID, basado en scrapers existentes
+        MÉTODO ÚNICO: Click y usar window.location.href para obtener UUID real
+        Basado en el método funcional de ComprasMX_v2Claude.py
         """
-        metodos = [
-            self._metodo_click_directo,
-            self._metodo_javascript_click,
-            self._metodo_action_chains_click,
-            self._metodo_scroll_y_click
-        ]
-        
-        for i, metodo in enumerate(metodos, 1):
-            try:
-                logger.debug(f"    🔄 Probando método {i} para extraer UUID...")
-                uuid = metodo(celda_objetivo)
-                if uuid:
-                    logger.debug(f"    ✅ Método {i} exitoso - UUID: {uuid}")
-                    return uuid
-            except Exception as e:
-                logger.debug(f"    ❌ Método {i} falló: {str(e)[:50]}...")
-                continue
-        
-        logger.warning("    ⚠️  Todos los métodos de extracción fallaron")
-        return None
-
-    def _metodo_click_directo(self, celda) -> Optional[str]:
-        """Método 1: Click directo"""
-        celda.click()
-        time.sleep(2)
-        return self._obtener_uuid_de_url()
-
-    def _metodo_javascript_click(self, celda) -> Optional[str]:
-        """Método 2: Click con JavaScript"""
-        self.driver.execute_script("arguments[0].click();", celda)
-        time.sleep(2)
-        return self._obtener_uuid_de_url()
-
-    def _metodo_action_chains_click(self, celda) -> Optional[str]:
-        """Método 3: Click con ActionChains"""
-        actions = ActionChains(self.driver)
-        actions.move_to_element(celda).click().perform()
-        time.sleep(2)
-        return self._obtener_uuid_de_url()
-
-    def _metodo_scroll_y_click(self, celda) -> Optional[str]:
-        """Método 4: Scroll hasta elemento y click"""
-        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", celda)
-        time.sleep(0.5)
-        self.driver.execute_script("window.scrollBy(0, -100);")
-        time.sleep(0.3)
-        celda.click()
-        time.sleep(2)
-        return self._obtener_uuid_de_url()
-
-    def _obtener_uuid_de_url(self) -> Optional[str]:
-        """Extraer UUID de la URL actual y regresar a la página principal"""
         try:
-            url_actual = self.driver.current_url
+            logger.debug("    🔄 Click y captura window.location.href...")
             
-            # Buscar UUID en formato de 32 caracteres hex
-            patron = r'/detalle/([a-f0-9]{32})/'
-            match = re.search(patron, url_actual)
+            # 1. HACER CLICK EN LA CELDA
+            celda_objetivo.click()
+            time.sleep(3)  # Esperar navegación
             
-            if match:
-                uuid = match.group(1)
-                # Regresar a la página principal
-                self.driver.back()
-                time.sleep(1)
-                return uuid
+            # 2. CAPTURAR URL REAL USANDO window.location.href
+            url_completa_real = self.driver.execute_script("return window.location.href;")
+            logger.debug(f"    🌐 URL capturada: {url_completa_real}")
             
-            # Si no encuentra UUID, también regresar
-            if "/detalle/" in url_actual:
+            # 3. EXTRAER UUID DEL PATRÓN DE URL
+            if "/detalle/" in url_completa_real:
+                patron = r'/detalle/([a-f0-9]{32})/'
+                match = re.search(patron, url_completa_real)
+                
+                if match:
+                    uuid = match.group(1)
+                    logger.debug(f"    🔑 UUID extraído: {uuid}")
+                    
+                    # 4. REGRESAR AL LISTADO
+                    self.driver.back()
+                    time.sleep(2)
+                    return uuid
+                else:
+                    logger.debug("    ❌ No se encontró UUID en la URL")
+            else:
+                logger.debug("    ❌ URL no navega a detalle")
+            
+            # Si llegamos aquí, algo falló - regresar si es posible
+            if "/detalle/" in url_completa_real:
                 self.driver.back()
                 time.sleep(1)
             
             return None
             
         except Exception as e:
-            logger.debug(f"Error obteniendo UUID de URL: {e}")
+            logger.debug(f"    ❌ Error en extracción UUID: {e}")
+            # Intentar regresar en caso de error
+            try:
+                current_url = self.driver.execute_script("return window.location.href;")
+                if "/detalle/" in current_url:
+                    self.driver.back()
+                    time.sleep(1)
+            except:
+                pass
             return None
 
     def extraer_todas_uuids(self, limite: int = 10) -> List[LicitacionUUID]:
         """
-        Extraer UUIDs de todas las licitaciones en la página principal
+        Extraer UUIDs de todas las licitaciones usando método único
         """
         logger.info(f"🔍 Iniciando extracción de UUIDs (límite: {limite})")
+        logger.info("🎯 MÉTODO ÚNICO: window.location.href después de click")
         
         if not self.navegar_sitio_principal():
             return []
@@ -388,7 +332,7 @@ class ComprasMXScraperConsolidado:
                 logger.warning(f"    ❌ No se pudo extraer UUID")
             
             # Pausa entre extracciones
-            time.sleep(0.5)
+            time.sleep(1)
         
         logger.info(f"✅ Extracción completada: {len(licitaciones_con_uuid)}/{len(filas_a_procesar)} UUIDs exitosos")
         return licitaciones_con_uuid
@@ -418,7 +362,7 @@ class ComprasMXScraperConsolidado:
             self.driver.get(licitacion.url_detalle)
             
             # Esperar que cargue el contenido
-            time.sleep(5)
+            time.sleep(8)  # Tiempo suficiente para carga completa
             
             # Extraer texto completo usando document.body.textContent
             logger.debug("    📄 Extrayendo texto completo...")
@@ -552,7 +496,7 @@ TEXTO A ANALIZAR:
         """Guardar resultados en formato JSON"""
         if not archivo:
             timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-            archivo = f"comprasmx_consolidado_{timestamp}.json"
+            archivo = f"comprasmx_simplificado_{timestamp}.json"
         
         # Convertir dataclasses a dict para JSON
         datos_json = []
@@ -597,7 +541,8 @@ TEXTO A ANALIZAR:
         Returns:
             Dict con estadísticas y resultados
         """
-        logger.info("🚀 INICIANDO SCRAPER CONSOLIDADO COMPRASMX")
+        logger.info("🚀 INICIANDO SCRAPER SIMPLIFICADO COMPRASMX")
+        logger.info("🎯 MÉTODO ÚNICO: window.location.href")
         logger.info("=" * 60)
         
         try:
@@ -605,7 +550,7 @@ TEXTO A ANALIZAR:
             self.configurar_driver()
             
             # Fase 1: Extraer UUIDs
-            logger.info("\n📋 FASE 1: EXTRACCIÓN DE UUIDs")
+            logger.info("\n📋 FASE 1: EXTRACCIÓN DE UUIDs CON MÉTODO ÚNICO")
             licitaciones_uuid = self.extraer_todas_uuids(limite=limite)
             
             if not licitaciones_uuid:
@@ -648,14 +593,13 @@ TEXTO A ANALIZAR:
 
 def main():
     """
-    Función principal para ejecutar el scraper
-    Primera iteración: procesa solo 1 licitación como prueba
+    Función principal para ejecutar el scraper simplificado
     """
     # Configuración
     LIMITE = 1  # Solo 1 para primera iteración de prueba
-    HEADLESS = False  # False para ver qué está pasando, cambiar a True para producción
+    HEADLESS = False  # False para ver qué está pasando
     
-    # ACTUALIZADO: Verificar clave de Anthropic desde .env
+    # Verificar clave de Anthropic desde .env
     api_key = os.getenv('ANTHROPIC_API_KEY')
     if not api_key or api_key == 'your_api_key_here':
         logger.error("❌ ANTHROPIC_API_KEY no configurada correctamente en .env")
@@ -666,12 +610,13 @@ def main():
     
     print(f"✅ ANTHROPIC_API_KEY cargada desde .env: {api_key[:10]}...")
     
-    # Ejecutar scraper
-    scraper = ComprasMXScraperConsolidado(headless=HEADLESS, anthropic_api_key=api_key)
+    # Ejecutar scraper simplificado
+    scraper = ComprasMXScraperSimplificado(headless=HEADLESS, anthropic_api_key=api_key)
     resultado = scraper.ejecutar_proceso_completo(limite=LIMITE)
     
     if resultado.get("success"):
-        print(f"\n✅ PRIMERA ITERACIÓN COMPLETADA EXITOSAMENTE")
+        print(f"\n✅ SCRAPER SIMPLIFICADO COMPLETADO EXITOSAMENTE")
+        print(f"🎯 MÉTODO ÚNICO: window.location.href funcionó correctamente")
         print(f"📁 Archivo JSON generado: {resultado['archivo_generado']}")
         print(f"📊 UUIDs procesados: {resultado['stats']['uuids_extraidos']}")
         print(f"🤖 Procesados con Haiku: {resultado['stats']['procesadas_con_haiku']}")
