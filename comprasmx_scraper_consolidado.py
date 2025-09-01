@@ -7,13 +7,13 @@ OBJETIVO:
 1. Extraer UUIDs de ComprasMX usando window.location.href DESPUÉS DEL CLICK
 2. Ir a cada licitación individual y extraer texto completo
 3. Usar Claude Haiku para estructurar datos específicos
-4. Output: JSON estructurado
+4. Output: JSON estructurado SIN texto completo (archivo más liviano)
 
 MÉTODO COMPROBADO: Click + window.location.href (como ComprasMX_v2Claude.py)
-CONFIRMADO: Extracción directa del href NO funciona - se necesita click obligatorio
+CONFIRMADO: ¡¡¡FUNCIONA!!! El click es obligatorio para obtener UUIDs reales
 
 Autor: Claude + Usuario
-Versión: 2.2 - Método funcional con click obligatorio
+Versión: 2.3 - FUNCIONAL - JSON sin texto completo
 """
 
 import time
@@ -70,8 +70,7 @@ class LicitacionCompleta:
     numero_identificacion: str
     titulo_basico: str
     url_detalle: str
-    texto_completo: str
-    # Campos extraídos por Haiku
+    # Campos extraídos por Haiku - SIN texto_completo para archivo más liviano
     numero_procedimiento_contratacion: Optional[str] = None
     dependencia_entidad: Optional[str] = None
     ramo: Optional[str] = None
@@ -363,16 +362,16 @@ class ComprasMXScraperFuncional:
         1. Navegar a URL de detalle
         2. Extraer texto completo con document.body.textContent
         3. Enviar a Claude Haiku para estructurar datos
+        4. NO GUARDAR texto_completo en resultado (archivo más liviano)
         """
         logger.info(f"🤖 Procesando {licitacion.uuid} con Haiku...")
         
-        # Crear objeto de respuesta
+        # Crear objeto de respuesta SIN texto_completo
         resultado = LicitacionCompleta(
             uuid=licitacion.uuid,
             numero_identificacion=licitacion.numero_identificacion,
             titulo_basico=licitacion.titulo,
             url_detalle=licitacion.url_detalle,
-            texto_completo="",
             fecha_scraping=datetime.now().isoformat()
         )
         
@@ -398,12 +397,12 @@ class ComprasMXScraperFuncional:
                 time.sleep(5)
                 texto_completo = self.driver.execute_script("return document.body.textContent;")
             
-            resultado.texto_completo = texto_completo.strip() if texto_completo else ""
-            logger.debug(f"    ✅ Texto extraído: {len(resultado.texto_completo)} caracteres")
+            texto_completo = texto_completo.strip() if texto_completo else ""
+            logger.debug(f"    ✅ Texto extraído: {len(texto_completo)} caracteres")
             
             # Procesar con Haiku si está disponible
-            if self.anthropic_client and resultado.texto_completo:
-                datos_haiku = self._procesar_con_haiku(resultado.texto_completo)
+            if self.anthropic_client and texto_completo:
+                datos_haiku = self._procesar_con_haiku(texto_completo)
                 if datos_haiku:
                     # Asignar datos extraídos por Haiku
                     resultado.numero_procedimiento_contratacion = datos_haiku.get('numero_procedimiento_contratacion')
@@ -518,12 +517,12 @@ TEXTO A ANALIZAR:
         return resultados
 
     def guardar_resultados_json(self, resultados: List[LicitacionCompleta], archivo: str = None) -> str:
-        """Guardar resultados en formato JSON"""
+        """Guardar resultados en formato JSON - SIN texto_completo para archivo más liviano"""
         if not archivo:
             timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
             archivo = f"comprasmx_funcional_{timestamp}.json"
         
-        # Convertir dataclasses a dict para JSON
+        # Convertir dataclasses a dict para JSON - SIN texto_completo
         datos_json = []
         for resultado in resultados:
             datos_json.append({
@@ -531,7 +530,7 @@ TEXTO A ANALIZAR:
                 'numero_identificacion': resultado.numero_identificacion,
                 'titulo_basico': resultado.titulo_basico,
                 'url_detalle': resultado.url_detalle,
-                'texto_completo': resultado.texto_completo,
+                # REMOVIDO: 'texto_completo' para archivo más liviano
                 'numero_procedimiento_contratacion': resultado.numero_procedimiento_contratacion,
                 'dependencia_entidad': resultado.dependencia_entidad,
                 'ramo': resultado.ramo,
@@ -554,6 +553,7 @@ TEXTO A ANALIZAR:
             json.dump(datos_json, f, ensure_ascii=False, indent=2)
         
         logger.info(f"💾 Resultados guardados en: {archivo}")
+        logger.info(f"📦 Archivo optimizado: SIN texto_completo (más liviano)")
         return archivo
 
     def ejecutar_proceso_completo(self, limite: int = 1) -> Dict:
@@ -568,6 +568,7 @@ TEXTO A ANALIZAR:
         """
         logger.info("🚀 INICIANDO SCRAPER FUNCIONAL COMPRASMX")
         logger.info("🎯 MÉTODO FUNCIONAL: Click + window.location.href")
+        logger.info("📦 ARCHIVO OPTIMIZADO: Sin texto_completo")
         logger.info("=" * 60)
         
         try:
@@ -642,6 +643,7 @@ def main():
     if resultado.get("success"):
         print(f"\n✅ SCRAPER FUNCIONAL COMPLETADO EXITOSAMENTE")
         print(f"🎯 MÉTODO FUNCIONAL: Click + window.location.href funcionó")
+        print(f"📦 ARCHIVO OPTIMIZADO: Sin texto_completo (más liviano)")
         print(f"📁 Archivo JSON generado: {resultado['archivo_generado']}")
         print(f"📊 UUIDs procesados: {resultado['stats']['uuids_extraidos']}")
         print(f"🤖 Procesados con Haiku: {resultado['stats']['procesadas_con_haiku']}")
