@@ -145,6 +145,38 @@ class ComprasMXScraperSimple:
                 try:
                     enlace = self.wait.until(EC.element_to_be_clickable((selector_type, selector_value)))
                     print(f"✅ Encontrado con selector: {selector_type} = {selector_value}")
+                    break
+                except TimeoutException:
+                    print(f"⏳ No encontrado: {selector_type} = {selector_value}")
+                    continue
+            
+            if not enlace:
+                # Mostrar todos los enlaces disponibles para debug
+                print("🔍 Enlaces disponibles en la página:")
+                enlaces = self.driver.find_elements(By.TAG_NAME, "a")
+                for i, link in enumerate(enlaces[:10]):  # Solo los primeros 10
+                    texto = link.text.strip()
+                    href = link.get_attribute('href')
+                    if texto or href:
+                        print(f"  [{i}] '{texto}' -> {href}")
+                
+                print("❌ No se encontró el enlace 'Búsqueda de Procedimientos'")
+                return []
+            
+            enlace.click()
+            print("✅ Click en 'Búsqueda de Procedimientos'")
+            time.sleep(5)  # Esperar que cargue la nueva página
+        except TimeoutException:
+            print("❌ No se encontró el enlace 'Búsqueda de Procedimientos'")
+            return []
+        
+        # Esperar la tabla
+        try:
+            self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "tbody tr")))
+            print("✅ Tabla cargada")
+        except TimeoutException:
+            print("❌ Tabla no cargó")
+            return []
         
         licitaciones = []
         for i in range(limite):
