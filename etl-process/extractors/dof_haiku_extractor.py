@@ -76,7 +76,7 @@ class HaikuExtractor:
         patron_pagina = re.compile(r'=====\s*\[PÁGINA\s+(\d+)\]\s*=====', re.IGNORECASE)
         marcadores = list(patron_pagina.finditer(contenido))
         
-        if len(marcadores) < 10:
+        if len(marcadores) < 5:
             print("[WARN] Muy pocas páginas encontradas para buscar índice")
             return 0, len(marcadores)
         
@@ -93,14 +93,16 @@ class HaikuExtractor:
         
         print("[INFO] Buscando páginas de convocatorias en el índice del DOF...")
         
-        # Buscar patrones del índice que indican dónde empiezan las convocatorias
-        patron_convocatorias = re.compile(
-            r'CONVOCATORIAS?\s+(?:PARA\s+)?(?:CONCURSOS?|LICITACIONES?).*?(\d+)',
+        # PATRONES ESPECÍFICOS DEL ÍNDICE DEL DOF
+        # Buscar: "Licitaciones Públicas Nacionales e Internacionales. ........ 171"
+        patron_licitaciones = re.compile(
+            r'Licitaciones\s+Públicas\s+Nacionales\s+e\s+Internacionales\.\s*[.\s]*(\d+)',
             re.IGNORECASE | re.DOTALL
         )
         
+        # Buscar: "Judiciales y generales. ........ 221"
         patron_avisos = re.compile(
-            r'AVISOS?\s+(?:JUDICIALES?|GENERALES?)?.*?(\d+)',
+            r'Judiciales\s+y\s+generales\.\s*[.\s]*(\d+)',
             re.IGNORECASE | re.DOTALL
         )
         
@@ -108,83 +110,120 @@ class HaikuExtractor:
         fin_convocatorias = None
         
         # Buscar números de página en el índice
-        match_convocatorias = patron_convocatorias.search(texto_indice)
-        if match_convocatorias:
+        match_licitaciones = patron_licitaciones.search(texto_indice)
+        if match_licitaciones:
             try:
-                inicio_convocatorias = int(match_convocatorias.group(1))
-                print(f"[INFO] Convocatorias inician en página {inicio_convocatorias}")
-            except:
+                inicio_convocatorias = int(match_licitaciones.group(1))
+                print(f"[INFO] Licitaciones inician en página {inicio_convocatorias}")
+            except ValueError:
                 pass
         
         match_avisos = patron_avisos.search(texto_indice)
         if match_avisos:
             try:
                 fin_convocatorias = int(match_avisos.group(1)) - 1  # Antes de avisos
-                print(f"[INFO] Convocatorias terminan en página {fin_convocatorias}")
-            except:
+                print(f"[INFO] Avisos inician en página {int(match_avisos.group(1))}, convocatorias terminan en página {fin_convocatorias}")
+            except ValueError:
                 pass
         
-        # Si no encontramos en el índice, buscar directamente en el contenido
+        # Fallback: buscar patrones más genéricos si los específicos fallan
         if inicio_convocatorias is None:
-            print("[INFO] No se encontró en índice, buscando directamente en contenido...")
+            print("[INFO] Patrones específicos no encontrados, probando genéricos...")
             
-            # Buscar primera aparición de convocatorias en el contenido
-            for i, marcador in enumerate(marcadores):
-                numero_pagina = int(marcador.group(1))
-                inicio_pagina = marcador.start()
-                
-                if i + 1 < len(marcadores):
-                    fin_pagina = marcadores[i + 1].start()
-                else:
-                    fin_pagina = len(contenido)
-                
-                contenido_pagina = contenido[inicio_pagina:fin_pagina]
-                
-                if re.search(r'CONVOCATORIAS?\s+(?:PARA\s+)?CONCURSOS?', contenido_pagina, re.IGNORECASE):
-                    inicio_convocatorias = numero_pagina
-                    print(f"[INFO] Convocatorias encontradas directamente en página {numero_pagina}")
-                    break
+            # Buscar variaciones del patrón
+            patron_conv_fallback = re.compile(
+                r'(?:CONVOCATORIAS|Convocatorias).*?(?:CONCURSOS|LICITACIONES|Licitaciones).*?(\d+)',
+                re.IGNORECASE | re.DOTALL
+            )
+            
+            match_fallback = patron_conv_fallback.search(texto_indice)
+            if match_fallback:
+                try:
+                    inicio_convocatorias = int(match_fallback.group(1))
+                    print(f"[INFO] Convocatorias encontradas (fallback) en página {inicio_convocatorias}")
+                except ValueError:
+                    pass
         
-        if fin_convocatorias is None:
-            # Buscar donde empiezan los avisos después de convocatorias
-            if inicio_convocatorias:
-                # Buscar desde la página de inicio hacia adelante
-                inicio_busqueda = max(0, inicio_convocatorias - 1)  # Índice 0-based
-                
-                for i in range(inicio_busqueda, len(marcadores)):
-                    marcador = marcadores[i]
-                    numero_pagina = int(marcador.group(1))
-                    inicio_pagina = marcador.start()
-                    
-                    if i + 1 < len(marcadores):
-                        fin_pagina = marcadores[i + 1].start()
-                    else:
-                        fin_pagina = len(contenido)
-                    
-                    contenido_pagina = contenido[inicio_pagina:fin_pagina]
-                    
-                    if re.search(r'AVISOS?\s+(?:JUDICIALES?|GENERALES?)', contenido_pagina, re.IGNORECASE):
-                        fin_convocatorias = numero_pagina - 1
-                        print(f"[INFO] Avisos encontrados en página {numero_pagina}, convocatorias terminan en {fin_convocatorias}")
-                        break
+        if fin_convocatorias is None and inicio_convocatorias:
+            print("[INFO] Buscando fin de convocatorias con patrón genérico...")
+            
+            patron_avisos_fallback = re.compile(
+                r'(?:AVISOS|Avisos).*?(?:JUDICIALES|Judiciales|GENERALES|generales).*?(\d+)',
+                re.IGNORECASE | re.DOTALL
+            )
+            
+            match_avisos_fallback = patron_avisos_fallback.search(texto_indice)
+            if match_avisos_fallback:
+                try:
+                    fin_convocatorias = int(match_avisos_fallback.group(1)) - 1
+                    print(f"[INFO] Avisos encontrados (fallback) en página {int(match_avisos_fallback.group(1))}, convocatorias terminan en {fin_convocatorias}")
+                except ValueError:
+                    pass
         
-        # Valores por defecto si no encontramos nada
+        # Validación y valores por defecto
         if inicio_convocatorias is None:
-            inicio_convocatorias = 1
-            print("[WARN] No se pudo determinar inicio de convocatorias, usando página 1")
+            print("[WARN] No se pudo determinar inicio de convocatorias")
+            # Como último recurso, buscar en contenido directo
+            return self._buscar_en_contenido_directo(contenido, marcadores)
         
         if fin_convocatorias is None:
-            fin_convocatorias = len(marcadores)
+            # Si encontramos inicio pero no fin, asumir que van hasta cerca del final
+            fin_convocatorias = min(inicio_convocatorias + 100, len(marcadores))
             print(f"[WARN] No se pudo determinar fin de convocatorias, usando página {fin_convocatorias}")
         
         # Validar que el rango tenga sentido
         if inicio_convocatorias >= fin_convocatorias:
-            print("[WARN] Rango de convocatorias inválido, usando todo el documento")
-            inicio_convocatorias = 1
-            fin_convocatorias = len(marcadores)
+            print(f"[ERROR] Rango inválido: inicio={inicio_convocatorias}, fin={fin_convocatorias}")
+            return self._buscar_en_contenido_directo(contenido, marcadores)
+        
+        # Limitar rangos muy grandes (más de 150 páginas probablemente es un error)
+        if fin_convocatorias - inicio_convocatorias > 150:
+            print(f"[WARN] Rango muy grande ({fin_convocatorias - inicio_convocatorias + 1} páginas), limitando a 100")
+            fin_convocatorias = inicio_convocatorias + 99
         
         print(f"[INFO] Procesando páginas {inicio_convocatorias} a {fin_convocatorias} ({fin_convocatorias - inicio_convocatorias + 1} páginas)")
         return inicio_convocatorias, fin_convocatorias
+    
+    def _buscar_en_contenido_directo(self, contenido: str, marcadores: List) -> Tuple[int, int]:
+        """Fallback: buscar convocatorias directamente en el contenido de las páginas"""
+        print("[INFO] Fallback: buscando convocatorias directamente en contenido...")
+        
+        inicio_encontrado = None
+        fin_encontrado = None
+        
+        for i, marcador in enumerate(marcadores):
+            numero_pagina = int(marcador.group(1))
+            inicio_pagina = marcador.start()
+            
+            if i + 1 < len(marcadores):
+                fin_pagina = marcadores[i + 1].start()
+            else:
+                fin_pagina = len(contenido)
+            
+            contenido_pagina = contenido[inicio_pagina:fin_pagina]
+            
+            # Buscar inicio de convocatorias
+            if inicio_encontrado is None:
+                if re.search(r'(?:CONVOCATORIAS|Convocatorias).*?(?:CONCURSOS|LICITACIONES)', contenido_pagina, re.IGNORECASE):
+                    inicio_encontrado = numero_pagina
+                    print(f"[INFO] Convocatorias encontradas directamente en página {numero_pagina}")
+            
+            # Buscar fin (inicio de avisos)
+            if inicio_encontrado and fin_encontrado is None:
+                if re.search(r'(?:AVISOS|Avisos).*?(?:JUDICIALES|GENERALES)', contenido_pagina, re.IGNORECASE):
+                    fin_encontrado = numero_pagina - 1
+                    print(f"[INFO] Avisos encontrados en página {numero_pagina}, convocatorias terminan en {fin_encontrado}")
+                    break
+        
+        if inicio_encontrado is None:
+            print("[ERROR] No se pudieron encontrar convocatorias en ningún lado")
+            return 0, 0
+        
+        if fin_encontrado is None:
+            fin_encontrado = min(inicio_encontrado + 50, len(marcadores))
+            print(f"[WARN] No se encontró fin, usando página {fin_encontrado}")
+        
+        return inicio_encontrado, fin_encontrado
     
     def dividir_por_paginas_convocatorias(self, txt_path: str) -> List[Dict]:
         """
