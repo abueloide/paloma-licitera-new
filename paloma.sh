@@ -428,6 +428,12 @@ case $COMMAND in
         mkdir -p data/raw/sitios-masivos
         mkdir -p data/processed
         
+        # Hacer ejecutables los cornerstones
+        if [ -d "cornerstones" ]; then
+            print_status "Configurando permisos de cornerstones..."
+            find cornerstones -name "*.py" -exec chmod +x {} \;
+        fi
+        
         # Verificar estado final de PostgreSQL
         echo ""
         if psql -h localhost -U postgres -d paloma_licitera -c "SELECT 1;" > /dev/null 2>&1; then
@@ -612,11 +618,25 @@ case $COMMAND in
         echo "  - ComprasMX: $COMPRAS_FILES archivos JSON"
         echo "  - Tianguis: $TIANGUIS_FILES archivos JSON"
         echo "  - Sitios Masivos: DESHABILITADO TEMPORALMENTE"
+        
+        # Verificar cornerstones
+        echo ""
+        echo "Cornerstones disponibles:"
+        if [ -d "cornerstones" ]; then
+            CORNERSTONE_FILES=$(find cornerstones -name "*.py" | wc -l)
+            echo "  - Total archivos Python: $CORNERSTONE_FILES"
+            [ -f "cornerstones/comprasmx/comprasmx_scraper_consolidado.py" ] && echo "  ✅ ComprasMX" || echo "  ❌ ComprasMX"
+            [ -f "cornerstones/dof/dof_extractor.py" ] && echo "  ✅ DOF" || echo "  ❌ DOF"
+            [ -f "cornerstones/tianguis/tianguis_extractor.py" ] && echo "  ✅ Tianguis" || echo "  ❌ Tianguis"
+            [ -f "cornerstones/shared/database_utils.py" ] && echo "  ✅ Shared Utils" || echo "  ❌ Shared Utils"
+        else
+            print_warning "Directorio cornerstones no existe"
+        fi
         ;;
         
     download)
-        echo "📥 DESCARGANDO DATOS..."
-        echo "----------------------"
+        echo "🎯 DESCARGA CON CORNERSTONES"
+        echo "=============================="
         
         # Verificar PostgreSQL primero
         if ! psql -h localhost -U postgres -d paloma_licitera -c "SELECT 1;" > /dev/null 2>&1; then
@@ -625,60 +645,82 @@ case $COMMAND in
             exit 1
         fi
         
+        # Verificar cornerstones
+        if [ ! -d "cornerstones" ]; then
+            print_error "Directorio cornerstones no existe"
+            echo "Ejecuta: git pull para obtener los cornerstones actualizados"
+            exit 1
+        fi
+        
         source venv/bin/activate
         
         echo "Selecciona qué descargar:"
-        echo "1) Todo disponible (ComprasMX, DOF, Tianguis) - Sitios Masivos DESHABILITADO"
-        echo "2) Solo procesar archivos existentes (sin descargar)"
-        echo "3) Solo ComprasMX"
-        echo "4) Solo DOF"
-        echo "5) Solo Tianguis Digital"
-        echo "6) [DESHABILITADO] Sitios Masivos"
+        echo "1) Todo con cornerstones (ComprasMX + DOF + Tianguis)"
+        echo "2) Solo procesar archivos existentes"
+        echo "3) Solo ComprasMX (cornerstone)"
+        echo "4) Solo DOF (cornerstone)"
+        echo "5) Solo Tianguis Digital (cornerstone)"
         echo -n "Opción: "
         read option
         
         case $option in
             1)
-                print_warning "NOTA: El proceso puede tardar varios minutos."
-                print_warning "Sitios Masivos está DESHABILITADO temporalmente."
-                print_warning "Presiona Ctrl+C si necesitas cancelar."
-                echo ""
-                print_info "Descargando datos disponibles (sin Sitios Masivos)..."
+                print_info "🎯 DESCARGA COMPLETA CON CORNERSTONES"
+                echo "======================================="
                 
-                # Modificado para excluir sitios-masivos
-                python src/etl.py --fuente comprasmx 2>&1 | tee logs/etl_download.log
-                python src/etl.py --fuente dof 2>&1 | tee -a logs/etl_download.log
-                python src/etl.py --fuente tianguis 2>&1 | tee -a logs/etl_download.log
-                
-                if [ ${PIPESTATUS[0]} -ne 0 ]; then
-                    print_warning "El proceso terminó con advertencias. Revisa logs/etl_download.log"
+                # 1. COMPRASMX
+                print_info "1/3 Ejecutando ComprasMX cornerstone..."
+                if [ -f "cornerstones/comprasmx/comprasmx_scraper_consolidado.py" ]; then
+                    python cornerstones/comprasmx/comprasmx_scraper_consolidado.py 2>&1 | tee logs/etl_download.log
                 else
-                    print_status "Descarga completada"
+                    print_error "ComprasMX cornerstone no encontrado"
                 fi
+                
+                # 2. DOF
+                print_info "2/3 Ejecutando DOF cornerstone..."
+                if [ -f "cornerstones/dof/dof_extractor.py" ]; then
+                    python cornerstones/dof/dof_extractor.py 2>&1 | tee -a logs/etl_download.log
+                else
+                    print_error "DOF cornerstone no encontrado"
+                fi
+                
+                # 3. TIANGUIS
+                print_info "3/3 Ejecutando Tianguis cornerstone..."
+                if [ -f "cornerstones/tianguis/tianguis_extractor.py" ]; then
+                    python cornerstones/tianguis/tianguis_extractor.py 2>&1 | tee -a logs/etl_download.log
+                else
+                    print_error "Tianguis cornerstone no encontrado"
+                fi
+                
+                # PROCESAMIENTO FINAL
+                print_info "Procesando archivos descargados en BD..."
+                python src/etl.py --fuente comprasmx --solo-procesamiento 2>&1 | tee -a logs/etl_download.log
+                python src/etl.py --fuente dof --solo-procesamiento 2>&1 | tee -a logs/etl_download.log
+                python src/etl.py --fuente tianguis --solo-procesamiento 2>&1 | tee -a logs/etl_download.log
+                
+                print_status "✅ DESCARGA CON CORNERSTONES COMPLETADA"
                 ;;
             2)
-                print_info "Procesando archivos existentes (sin descargar nuevos)..."
-                # Modificado para excluir sitios-masivos del procesamiento también
+                print_info "Procesando archivos existentes..."
                 python src/etl.py --fuente comprasmx --solo-procesamiento
                 python src/etl.py --fuente dof --solo-procesamiento
                 python src/etl.py --fuente tianguis --solo-procesamiento
                 print_status "Procesamiento completado"
                 ;;
             3)
-                print_info "Descargando ComprasMX..."
-                python src/etl.py --fuente comprasmx
+                print_info "🛒 Solo ComprasMX cornerstone..."
+                python cornerstones/comprasmx/comprasmx_scraper_consolidado.py
+                python src/etl.py --fuente comprasmx --solo-procesamiento
                 ;;
             4)
-                print_info "Descargando DOF..."
-                python src/etl.py --fuente dof
+                print_info "📰 Solo DOF cornerstone..."
+                python cornerstones/dof/dof_extractor.py
+                python src/etl.py --fuente dof --solo-procesamiento
                 ;;
             5)
-                print_info "Descargando Tianguis Digital..."
-                python src/etl.py --fuente tianguis
-                ;;
-            6)
-                print_error "Sitios Masivos está DESHABILITADO temporalmente"
-                print_info "Esta opción no está disponible en este momento"
+                print_info "🏛️ Solo Tianguis Digital cornerstone..."
+                python cornerstones/tianguis/tianguis_extractor.py
+                python src/etl.py --fuente tianguis --solo-procesamiento
                 ;;
             *)
                 print_error "Opción inválida"
@@ -704,9 +746,8 @@ case $COMMAND in
         source venv/bin/activate
         
         print_info "Procesando archivos existentes sin descargar nuevos..."
-        print_warning "Nota: Sitios Masivos está DESHABILITADO temporalmente"
         
-        # Modificado para excluir sitios-masivos
+        # Usar ETL con solo procesamiento
         python src/etl.py --fuente comprasmx --solo-procesamiento
         python src/etl.py --fuente dof --solo-procesamiento
         python src/etl.py --fuente tianguis --solo-procesamiento
@@ -794,7 +835,7 @@ case $COMMAND in
                 fi
                 ;;
             3)
-                if [ -f "$BASE_DIR/logs/etl_download.log" ]; then
+                if [ -f "$$BASE_DIR/logs/etl_download.log" ]; then
                     echo "Logs de ETL/Descarga (últimas 50 líneas):"
                     echo "----------------------------------------"
                     tail -50 "$BASE_DIR/logs/etl_download.log"
@@ -829,20 +870,20 @@ case $COMMAND in
         echo "  logs              - Muestra los logs del sistema"
         echo ""
         echo "GESTIÓN DE DATOS:"
-        echo "  download          - Descarga datos de las fuentes (Sitios Masivos DESHABILITADO)"
+        echo "  download          - Descarga datos usando CORNERSTONES"
         echo "  download-quick    - Solo procesa archivos existentes"
         echo "  reset-db          - Elimina y recrea la BD con esquema híbrido"
         echo ""
-        echo "FLUJO RECOMENDADO PARA INSTALACIÓN:"
+        echo "FLUJO RECOMENDADO:"
         echo "  1. ./paloma.sh install        # Instala todo automáticamente"
-        echo "  2. ./paloma.sh download       # Descarga datos"
+        echo "  2. ./paloma.sh download       # Descarga con cornerstones"
         echo "  3. ./paloma.sh start          # Inicia sistema"
         echo ""
         echo "SI HAY PROBLEMAS:"
-        echo "  ./paloma.sh doctor            # Diagnostica y arregla automáticamente"
-        echo "  ./paloma.sh reset-db          # Recrea BD con esquema híbrido correcto"
+        echo "  ./paloma.sh doctor            # Diagnostica y arregla"
+        echo "  ./paloma.sh reset-db          # Recrea BD"
         echo ""
-        echo "NOTA: Sitios Masivos está temporalmente DESHABILITADO"
+        echo "NUEVA ARQUITECTURA: Ahora usa cornerstones/ en lugar de etl-process/"
         echo ""
         exit 1
         ;;
