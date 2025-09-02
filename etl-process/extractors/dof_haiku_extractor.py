@@ -4,7 +4,8 @@
 Descarga, parseo y extracción con Haiku de licitaciones del DOF
 - Descarga PDFs para fechas y ediciones especificadas
 - Extrae texto por página a TXT
-- Envía cada página a Claude Haiku para extraer licitaciones en formato JSON estructurado
+- IDENTIFICA PÁGINAS DE CONVOCATORIAS usando el índice del DOF
+- Envía SOLO páginas de convocatorias a Claude Haiku para extraer licitaciones
 
 Dependencias requeridas:
     pip install requests pymupdf pdfminer.six anthropic python-dotenv
@@ -17,7 +18,7 @@ import uuid
 from datetime import date, timedelta, datetime
 import requests
 import logging
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 from dotenv import load_dotenv
 
 # Cargar variables de entorno
@@ -57,11 +58,144 @@ class HaikuExtractor:
             
         self.client = anthropic.Anthropic(api_key=api_key)
     
-    def dividir_por_paginas(self, txt_path: str) -> List[Dict]:
+    def encontrar_paginas_convocatorias(self, txt_path: str) -> Tuple[int, int]:
         """
-        Lee el archivo TXT y divide por páginas usando marcadores
-        ===== [PÁGINA X] =====
+        Encuentra las páginas que contienen convocatorias leyendo el ÍNDICE del DOF
+        
+        Returns:
+            (inicio, fin) - números de página donde están las convocatorias
         """
+        try:
+            with open(txt_path, 'r', encoding='utf-8') as f:
+                contenido = f.read()
+        except Exception as e:
+            print(f"[ERROR] No se pudo leer {txt_path}: {e}")
+            return 0, 0
+        
+        # Buscar en las primeras páginas (típicamente primeras 10 páginas tienen el índice)
+        patron_pagina = re.compile(r'=====\s*\[PÁGINA\s+(\d+)\]\s*=====', re.IGNORECASE)
+        marcadores = list(patron_pagina.finditer(contenido))
+        
+        if len(marcadores) < 10:
+            print("[WARN] Muy pocas páginas encontradas para buscar índice")
+            return 0, len(marcadores)
+        
+        # Extraer texto de las primeras 10 páginas para buscar el índice
+        texto_indice = ""
+        for i in range(min(10, len(marcadores))):
+            inicio = marcadores[i].start()
+            if i + 1 < len(marcadores):
+                fin = marcadores[i + 1].start()
+            else:
+                fin = len(contenido)
+            
+            texto_indice += contenido[inicio:fin]
+        
+        print("[INFO] Buscando páginas de convocatorias en el índice del DOF...")
+        
+        # Buscar patrones del índice que indican dónde empiezan las convocatorias
+        patron_convocatorias = re.compile(
+            r'CONVOCATORIAS?\s+(?:PARA\s+)?(?:CONCURSOS?|LICITACIONES?).*?(\d+)',
+            re.IGNORECASE | re.DOTALL
+        )
+        
+        patron_avisos = re.compile(
+            r'AVISOS?\s+(?:JUDICIALES?|GENERALES?)?.*?(\d+)',
+            re.IGNORECASE | re.DOTALL
+        )
+        
+        inicio_convocatorias = None
+        fin_convocatorias = None
+        
+        # Buscar números de página en el índice
+        match_convocatorias = patron_convocatorias.search(texto_indice)
+        if match_convocatorias:
+            try:
+                inicio_convocatorias = int(match_convocatorias.group(1))
+                print(f"[INFO] Convocatorias inician en página {inicio_convocatorias}")
+            except:
+                pass
+        
+        match_avisos = patron_avisos.search(texto_indice)
+        if match_avisos:
+            try:
+                fin_convocatorias = int(match_avisos.group(1)) - 1  # Antes de avisos
+                print(f"[INFO] Convocatorias terminan en página {fin_convocatorias}")
+            except:
+                pass
+        
+        # Si no encontramos en el índice, buscar directamente en el contenido
+        if inicio_convocatorias is None:
+            print("[INFO] No se encontró en índice, buscando directamente en contenido...")
+            
+            # Buscar primera aparición de convocatorias en el contenido
+            for i, marcador in enumerate(marcadores):
+                numero_pagina = int(marcador.group(1))
+                inicio_pagina = marcador.start()
+                
+                if i + 1 < len(marcadores):
+                    fin_pagina = marcadores[i + 1].start()
+                else:
+                    fin_pagina = len(contenido)
+                
+                contenido_pagina = contenido[inicio_pagina:fin_pagina]
+                
+                if re.search(r'CONVOCATORIAS?\s+(?:PARA\s+)?CONCURSOS?', contenido_pagina, re.IGNORECASE):
+                    inicio_convocatorias = numero_pagina
+                    print(f"[INFO] Convocatorias encontradas directamente en página {numero_pagina}")
+                    break
+        
+        if fin_convocatorias is None:
+            # Buscar donde empiezan los avisos después de convocatorias
+            if inicio_convocatorias:
+                # Buscar desde la página de inicio hacia adelante
+                inicio_busqueda = max(0, inicio_convocatorias - 1)  # Índice 0-based
+                
+                for i in range(inicio_busqueda, len(marcadores)):
+                    marcador = marcadores[i]
+                    numero_pagina = int(marcador.group(1))
+                    inicio_pagina = marcador.start()
+                    
+                    if i + 1 < len(marcadores):
+                        fin_pagina = marcadores[i + 1].start()
+                    else:
+                        fin_pagina = len(contenido)
+                    
+                    contenido_pagina = contenido[inicio_pagina:fin_pagina]
+                    
+                    if re.search(r'AVISOS?\s+(?:JUDICIALES?|GENERALES?)', contenido_pagina, re.IGNORECASE):
+                        fin_convocatorias = numero_pagina - 1
+                        print(f"[INFO] Avisos encontrados en página {numero_pagina}, convocatorias terminan en {fin_convocatorias}")
+                        break
+        
+        # Valores por defecto si no encontramos nada
+        if inicio_convocatorias is None:
+            inicio_convocatorias = 1
+            print("[WARN] No se pudo determinar inicio de convocatorias, usando página 1")
+        
+        if fin_convocatorias is None:
+            fin_convocatorias = len(marcadores)
+            print(f"[WARN] No se pudo determinar fin de convocatorias, usando página {fin_convocatorias}")
+        
+        # Validar que el rango tenga sentido
+        if inicio_convocatorias >= fin_convocatorias:
+            print("[WARN] Rango de convocatorias inválido, usando todo el documento")
+            inicio_convocatorias = 1
+            fin_convocatorias = len(marcadores)
+        
+        print(f"[INFO] Procesando páginas {inicio_convocatorias} a {fin_convocatorias} ({fin_convocatorias - inicio_convocatorias + 1} páginas)")
+        return inicio_convocatorias, fin_convocatorias
+    
+    def dividir_por_paginas_convocatorias(self, txt_path: str) -> List[Dict]:
+        """
+        Lee el archivo TXT y divide SOLO las páginas de convocatorias
+        """
+        # Primero encontrar el rango de páginas de convocatorias
+        inicio_conv, fin_conv = self.encontrar_paginas_convocatorias(txt_path)
+        
+        if inicio_conv == 0 and fin_conv == 0:
+            return []
+        
         try:
             with open(txt_path, 'r', encoding='utf-8') as f:
                 contenido = f.read()
@@ -77,13 +211,18 @@ class HaikuExtractor:
             print(f"[WARN] No se encontraron marcadores de página en {txt_path}")
             return []
         
-        chunks_por_pagina = []
+        chunks_convocatorias = []
         
         for i, marcador in enumerate(marcadores):
             numero_pagina = int(marcador.group(1))
+            
+            # FILTRO CRÍTICO: Solo procesar páginas en el rango de convocatorias
+            if not (inicio_conv <= numero_pagina <= fin_conv):
+                continue
+            
             inicio_pagina = marcador.start()
             
-            # Determinar fin de página (inicio de siguiente o final del texto)
+            # Determinar fin de página
             if i + 1 < len(marcadores):
                 fin_pagina = marcadores[i + 1].start()
             else:
@@ -91,49 +230,31 @@ class HaikuExtractor:
             
             contenido_pagina = contenido[inicio_pagina:fin_pagina].strip()
             
-            # Solo incluir páginas con contenido sustancial y posibles licitaciones
-            if len(contenido_pagina) > 200 and self._pagina_parece_tener_licitaciones(contenido_pagina):
-                chunks_por_pagina.append({
+            # Solo incluir páginas con contenido sustancial
+            if len(contenido_pagina) > 200:
+                chunks_convocatorias.append({
                     'numero_pagina': numero_pagina,
                     'contenido': contenido_pagina,
                     'caracteres': len(contenido_pagina)
                 })
         
-        print(f"[INFO] Encontradas {len(chunks_por_pagina)} páginas con posibles licitaciones")
-        return chunks_por_pagina
-    
-    def _pagina_parece_tener_licitaciones(self, contenido: str) -> bool:
-        """
-        Filtro básico para identificar páginas que podrían tener licitaciones
-        """
-        contenido_lower = contenido.lower()
-        
-        # Palabras clave que indican licitaciones
-        palabras_clave = [
-            'licitación', 'licitacion', 'convocatoria', 'procedimiento',
-            'contratación', 'contratacion', 'adquisición', 'adquisicion',
-            'servicio', 'obra', 'suministro', 'arrendamiento',
-            'concurso', 'invitación', 'invitacion'
-        ]
-        
-        # Si tiene al menos 2 palabras clave, probablemente tiene licitaciones
-        count = sum(1 for palabra in palabras_clave if palabra in contenido_lower)
-        return count >= 2
+        print(f"[INFO] Encontradas {len(chunks_convocatorias)} páginas de convocatorias para procesar")
+        return chunks_convocatorias
     
     def procesar_pagina_con_haiku(self, info_pagina: Dict, archivo_origen: str) -> List[Dict]:
         """
-        Envía una página completa a Claude Haiku para extraer licitaciones
+        Envía una página de convocatorias a Claude Haiku para extraer licitaciones
         """
         numero_pagina = info_pagina['numero_pagina']
         contenido = info_pagina['contenido']
         
-        prompt = f"""Analiza esta PÁGINA COMPLETA #{numero_pagina} del Diario Oficial de la Federación mexicano.
+        prompt = f"""Analiza esta PÁGINA #{numero_pagina} del Diario Oficial de la Federación mexicano que contiene CONVOCATORIAS DE LICITACIONES.
 
 PÁGINA {numero_pagina} - CONTENIDO COMPLETO:
 {contenido}
 
 INSTRUCCIONES:
-1. Esta página puede contener UNA o VARIAS licitaciones/convocatorias del gobierno mexicano
+1. Esta página contiene UNA o VARIAS licitaciones/convocatorias del gobierno mexicano
 2. Extrae TODAS las licitaciones que encuentres en esta página
 3. Busca patrones como: "RESUMEN DE CONVOCATORIA", "Licitación Pública", "INVITACIÓN A CUANDO MENOS", convocatorias de organismos gubernamentales
 4. Cada licitación debe seguir EXACTAMENTE el formato JSON especificado
@@ -238,21 +359,21 @@ NO incluyas texto adicional, solo el JSON válido."""
     
     def procesar_txt_completo(self, txt_path: str, archivo_origen: str) -> List[Dict]:
         """
-        Procesa un archivo TXT completo enviando cada página a Haiku
+        Procesa un archivo TXT completo enviando SOLO páginas de convocatorias a Haiku
         """
         print(f"[INFO] Procesando con Haiku: {txt_path}")
         
-        # Dividir por páginas
-        chunks_por_pagina = self.dividir_por_paginas(txt_path)
+        # Dividir por páginas DE CONVOCATORIAS únicamente
+        chunks_convocatorias = self.dividir_por_paginas_convocatorias(txt_path)
         
-        if not chunks_por_pagina:
-            print(f"[WARN] No se encontraron páginas válidas en {txt_path}")
+        if not chunks_convocatorias:
+            print(f"[WARN] No se encontraron páginas de convocatorias en {txt_path}")
             return []
         
-        # Procesar cada página con Haiku
+        # Procesar cada página de convocatorias con Haiku
         todas_licitaciones = []
-        for chunk_info in chunks_por_pagina:
-            print(f"   [PROCESANDO] Página {chunk_info['numero_pagina']} ({chunk_info['caracteres']} chars)")
+        for chunk_info in chunks_convocatorias:
+            print(f"   [PROCESANDO] Página convocatoria {chunk_info['numero_pagina']} ({chunk_info['caracteres']} chars)")
             
             licitaciones = self.procesar_pagina_con_haiku(chunk_info, archivo_origen)
             todas_licitaciones.extend(licitaciones)
@@ -332,6 +453,7 @@ def main():
     todas_licitaciones_consolidadas = []
     
     print("=== DOF HAIKU EXTRACTOR - AGOSTO 2025 ===")
+    print("PROCESANDO SOLO PÁGINAS DE CONVOCATORIAS")
     
     for d in AUG_2025:
         ddmmyyyy = f"{d.day:02d}{d.month:02d}{d.year}"
@@ -372,7 +494,7 @@ def main():
                 resumen["pdfs"].append(entry)
                 continue
             
-            # Procesamiento con Haiku
+            # Procesamiento con Haiku - SOLO PÁGINAS DE CONVOCATORIAS
             try:
                 licitaciones = haiku_extractor.procesar_txt_completo(txt_path, f"{tag}.pdf")
                 
