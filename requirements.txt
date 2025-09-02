@@ -21,6 +21,7 @@ pdfminer.six==20221105
 
 # Web scraping - CRÍTICO para ComprasMX, tianguis, sitios-masivos
 playwright>=1.45.0
+selenium>=4.15.0
 
 # API framework - CRÍTICO para src/api.py
 fastapi>=0.110.0
